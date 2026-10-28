@@ -1,0 +1,8 @@
+# ThreadSanitizer suppressions for the GPU tests (used by the thread-sanitizer preset only).
+# Vulkan drivers (here Mesa lavapipe) are not instrumented: they synchronize their own objects with
+# primitives ThreadSanitizer cannot see (futex-based locks), so concurrent, valid calls such as
+# creating and destroying buffers from several threads are reported as races between the driver's
+# malloc and free. A report is suppressed when the stack of either racing access (or of the
+# allocation of the memory) has a frame inside the driver, so a race between dvv code and the
+# driver is hidden as well; races between two accesses in dvv code are still reported.
+race:libvulkan_lvp.so

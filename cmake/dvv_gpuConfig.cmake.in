@@ -1,0 +1,22 @@
+@PACKAGE_INIT@
+
+# The version, with the release-stage label of a pre-release build (applications show it, e.g. in
+# --version).
+set(dvv_gpu_VERSION_STRING "@dvv_gpu_VERSION_STRING@")
+
+include(CMakeFindDependencyMacro)
+find_dependency(dvv_base @dvv_base_MIN_VERSION@)
+find_dependency(dvv_platform @dvv_platform_MIN_VERSION@)
+# The pinned Vulkan-Headers package only, never CMake's FindVulkan module; the consumer's own
+# setting is restored afterwards (this file runs in the consumer's scope).
+set(_dvv_gpu_disable_vulkan "${CMAKE_DISABLE_FIND_PACKAGE_Vulkan}")
+set(CMAKE_DISABLE_FIND_PACKAGE_Vulkan ON)
+find_dependency(VulkanHeaders 1.4.365 EXACT CONFIG)
+set(CMAKE_DISABLE_FIND_PACKAGE_Vulkan "${_dvv_gpu_disable_vulkan}")
+unset(_dvv_gpu_disable_vulkan)
+
+include("${CMAKE_CURRENT_LIST_DIR}/dvv_gpuTargets.cmake")
+# dvv_add_shaders(); it needs the pinned slangc in CMAKE_PREFIX_PATH when it is called.
+include("${CMAKE_CURRENT_LIST_DIR}/DvvShaders.cmake")
+
+check_required_components(dvv_gpu)
