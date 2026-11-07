@@ -37,8 +37,10 @@ TEST_CASE("a headless registry asks for no surface extensions") {
 TEST_CASE("a window system adds VK_KHR_surface and its platform extension") {
     const std::vector<std::string_view> win32{"VK_KHR_surface", "VK_KHR_win32_surface"};
     const std::vector<std::string_view> xlib{"VK_KHR_surface", "VK_KHR_xlib_surface"};
+    const std::vector<std::string_view> metal{"VK_KHR_surface", "VK_EXT_metal_surface"};
     CHECK(names(windowSystemExtensions({.windowSystem = WindowSystem::Win32})) == win32);
     CHECK(names(windowSystemExtensions({.windowSystem = WindowSystem::Xlib})) == xlib);
+    CHECK(names(windowSystemExtensions({.windowSystem = WindowSystem::Metal})) == metal);
 }
 
 TEST_CASE("missing instance extensions are unsupported") {

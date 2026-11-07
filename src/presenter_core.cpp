@@ -127,7 +127,7 @@ VkCompositeAlphaFlagBitsKHR compositeAlpha(VkCompositeAlphaFlagsKHR supported) n
     return VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;  // the specification requires at least one bit
 }
 
-void PresenterMailbox::post(std::move_only_function<void()> work) {
+void PresenterMailbox::post(MoveOnlyFunction<void()> work) {
     core_->post(std::move(work));
 }
 
@@ -277,7 +277,7 @@ std::optional<Error> PresenterCore::failure() const {
     return failure_;
 }
 
-void PresenterCore::post(std::move_only_function<void()> work) {
+void PresenterCore::post(MoveOnlyFunction<void()> work) {
     // Notified under the mutex: the waiter thread posts the last completion, after which the
     // presenter thread may exit and the GUI thread destroy the core. Notifying after the unlock
     // could touch wake_ while it is being destroyed.
@@ -293,7 +293,7 @@ void PresenterCore::frameFinished(Result<std::uint64_t> result) noexcept {
 // design M1b §5.2: one iteration per wake-up. The thread never exits while a frame is in flight, so
 // a suspended FrameJob is never destroyed (SubmitOperation contract).
 void PresenterCore::run() noexcept {
-    std::vector<std::move_only_function<void()>> work;
+    std::vector<MoveOnlyFunction<void()>> work;
     while (true) {
         {
             std::unique_lock lock(mutex_);

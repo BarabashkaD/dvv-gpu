@@ -113,6 +113,9 @@ add_executable(dvv_gpu_present_tests
     present_test_device_lost.cpp
     present_test_events.cpp
     present_test_presenter.cpp)
+if(APPLE)
+    target_sources(dvv_gpu_present_tests PRIVATE present_test_metal.cpp)
+endif()
 target_link_libraries(dvv_gpu_present_tests PRIVATE dvv::gpu dvv::platform_testing
                                                     doctest::doctest GPUOpen::VulkanMemoryAllocator)
 # The device-loss cases stub the context's dispatch table through the private headers.
@@ -133,6 +136,9 @@ set_property(TEST dvv_gpu.present APPEND PROPERTY LABELS sanity)
 # sanitizer builds, whose consumers would need the same runtime flags.
 if(NOT DVV_SANITIZE)
     string(REPLACE ";" "," deps_prefix_path "${CMAKE_PREFIX_PATH}")
+    # On macOS the consumers find the Vulkan loader (@rpath/libvulkan.1.dylib) through the same
+    # build rpath as this build (the third-party prefix's lib folder).
+    string(REPLACE ";" "," build_rpath "${CMAKE_BUILD_RPATH}")
     add_test(NAME dvv_gpu.package
              COMMAND ${CMAKE_COMMAND}
                      -DBUILD_DIR=${CMAKE_BINARY_DIR}
@@ -146,13 +152,15 @@ if(NOT DVV_SANITIZE)
                      -DPLATFORM=${CMAKE_GENERATOR_PLATFORM}
                      -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
                      -DDEPS_PREFIX_PATH=${deps_prefix_path}
+                     -DBUILD_RPATH=${build_rpath}
                      -DDVV_BUILD_CMAKE_DIR=${DVV_BUILD_CMAKE_DIR}
                      -P ${CMAKE_CURRENT_SOURCE_DIR}/package/run-package-test.cmake)
     # Package and compile-fail tests of every dvv repository drive the same build tree in a
     # dependent build with DVV_TEST_DEPENDENCIES, so they share one lock name.
     set_tests_properties(dvv_gpu.package PROPERTIES
         RESOURCE_LOCK dvv_build_tree
-        LABELS package)
+        LABELS package
+        ENVIRONMENT_MODIFICATION "${DVV_TEST_ENVIRONMENT}")
 endif()
 
 # Compile-fail tests (spec §9.4), run by dvv-base's shared runner. Case 0 is the control and must

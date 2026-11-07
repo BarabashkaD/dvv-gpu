@@ -12,10 +12,17 @@ int main() {
         return 1;
     }
     // Without a Vulkan loader (CI's Windows runners) the registry reports Unsupported; anything
-    // else is a failure. Validation stays off: a system's older layer may be installed.
+    // else is a failure. On macOS the third-party prefix always has the loader (found through the
+    // build rpath), so any error is a failure there. Validation stays off: a system's older layer
+    // may be installed.
     const auto registry =
         dvv::gpu::GpuRegistry::create({.validation = dvv::gpu::ValidationMode::Off});
-    if (!registry && registry.error().code != dvv::Errc::Unsupported) {
+#if defined(__APPLE__)
+    constexpr bool LOADER_REQUIRED = true;
+#else
+    constexpr bool LOADER_REQUIRED = false;
+#endif
+    if (!registry && (LOADER_REQUIRED || registry.error().code != dvv::Errc::Unsupported)) {
         std::printf("%s\n", registry.error().describe().c_str());
         return 1;
     }

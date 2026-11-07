@@ -83,10 +83,12 @@ TEST_CASE_FIXTURE(PresentTest, "minimise and restore") {
     }));
     CHECK_FALSE(p->stats().failed);
 #endif
-    // As the GUI does on both platforms.
+    // As the GUI does on every platform.
     p->setVisible(false);
 #if !defined(_WIN32)
-    window().minimise();  // Xlib: unmap (not run in v1.0, U-WIN)
+    // Xlib: unmap (not run in v1.0, U-WIN). Cocoa: miniaturize; KosmicKrisp keeps reporting the
+    // layer's size as currentExtent, so this is not the 0-extent path.
+    window().minimise();
 #endif
     static_cast<void>(pumpUntil(window(), [] { return false; }, 100ms));
 

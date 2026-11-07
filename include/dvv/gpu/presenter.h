@@ -5,7 +5,6 @@
 // presents. One frame is in flight at a time.
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -14,6 +13,7 @@
 
 #include "dvv/base/error.h"
 #include "dvv/base/lifetime.h"
+#include "dvv/base/move_only_function.h"
 #include "dvv/gpu/resources.h"
 #include "dvv/gpu/submission.h"
 #include "dvv/platform/native_window.h"
@@ -52,10 +52,14 @@ struct PresentFrame {
 // presenter instead (failure(), one onError). The provider is called before the acquire: the
 // record function of a dropped frame is destroyed without running (see
 // PresentFrameInfo::previousFrameCompleted).
-using FrameProvider = std::move_only_function<Result<PresentFrame>(const PresentFrameInfo&)>;
+using FrameProvider = MoveOnlyFunction<Result<PresentFrame>(const PresentFrameInfo&)>;
 // Called on the presenter thread; the GUI forwards it (e.g. wx CallAfter).
-using PresenterErrorHandler = std::move_only_function<void(const Error&) noexcept>;
+using PresenterErrorHandler = MoveOnlyFunction<void(const Error&) noexcept>;
 
+// A MetalWindow's CAMetalLayer: its owner (the GUI thread) sets the layer's frame and contentsScale
+// and never its drawableSize; the swapchain sets drawableSize to its extent, which is the layer's
+// bounds times contentsScale (also for fractional point bounds), i.e. the physical size passed here
+// and to resize().
 struct PresenterOptions {
     platform::NativeWindow window{};  // must outlive the presenter
     platform::PixelSize extent{};     // current client size in physical pixels (a hint)
