@@ -16,11 +16,13 @@ struct LoaderLibrary {
     platform::LibrarySearch search = platform::LibrarySearch::Default;
 };
 
-// Empty library_name: the platform's loader from the system directory ("vulkan-1.dll" on Windows,
-// so a vulkan-1.dll next to the executable, in the current directory or on PATH is not found by the
-// search (a module of that name already loaded in the process is used as is); "libvulkan.so.1" on
-// Linux, where that search is the default one). Otherwise (tests) the given name, searched the
-// usual way.
+// Empty library_name: the platform's loader. Windows: "vulkan-1.dll" from the system directory, so
+// a vulkan-1.dll next to the executable, in the current directory or on PATH is not found by the
+// search (a module of that name already loaded in the process is used as is). Linux:
+// "libvulkan.so.1", where that search is the default one. macOS: "@rpath/libvulkan.1.dylib" with
+// the default search, found through the executable's LC_RPATH (the third-party prefix's lib folder
+// in a build tree, @executable_path/../Frameworks in the app). Otherwise (tests) the given name,
+// searched the usual way.
 [[nodiscard]] LoaderLibrary loaderLibrary(const std::string& library_name);
 
 // Loads the loader library (loaderLibrary(library_name)) and returns its vkGetInstanceProcAddr.

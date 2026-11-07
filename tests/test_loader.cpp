@@ -24,14 +24,20 @@ TEST_CASE("a missing Vulkan loader is reported as unsupported") {
     CHECK(loader.error().message == "Vulkan loader not found ('dvv-test-no-such-vulkan-loader')");
 }
 
-TEST_CASE("the default loader is the platform's library from the system directory") {
+TEST_CASE("the default loader is the platform's library") {
     const auto library = loaderLibrary("");
 #if defined(_WIN32)
     CHECK(library.name == "vulkan-1.dll");
+    CHECK(library.search == LibrarySearch::SystemDirectory);
+#elif defined(__APPLE__)
+    // Through the executable's LC_RPATH: CMAKE_BUILD_RPATH (the third-party prefix's lib folder)
+    // in a build tree, @executable_path/../Frameworks in the app.
+    CHECK(library.name == "@rpath/libvulkan.1.dylib");
+    CHECK(library.search == LibrarySearch::Default);
 #else
     CHECK(library.name == "libvulkan.so.1");
-#endif
     CHECK(library.search == LibrarySearch::SystemDirectory);
+#endif
 }
 
 TEST_CASE("a named loader is searched the usual way") {
@@ -43,6 +49,8 @@ TEST_CASE("a named loader is searched the usual way") {
 TEST_CASE("a library without vkGetInstanceProcAddr is not a Vulkan loader") {
 #if defined(_WIN32)
     const std::string name = "kernel32.dll";
+#elif defined(__APPLE__)
+    const std::string name = "libSystem.B.dylib";
 #else
     const std::string name = "libc.so.6";
 #endif

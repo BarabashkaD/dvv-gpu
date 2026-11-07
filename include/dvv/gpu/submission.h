@@ -4,11 +4,11 @@
 
 #include <coroutine>
 #include <cstdint>
-#include <functional>
 #include <memory>
 
 #include "dvv/base/error.h"
 #include "dvv/base/executor.h"
+#include "dvv/base/move_only_function.h"
 #include "dvv/gpu/command_recorder.h"
 
 namespace dvv::gpu {
@@ -16,7 +16,7 @@ namespace dvv::gpu {
 class ExecutionContext;
 
 // The record function of a submission; runs on the context's submit thread.
-using RecordFunction = std::move_only_function<void(CommandRecorder&)>;
+using RecordFunction = MoveOnlyFunction<void(CommandRecorder&)>;
 
 // co_await ctx->submit(executor, record) hands the record function to the submit thread, which
 // records and submits it; the waiter thread waits until the GPU has finished, releases the record

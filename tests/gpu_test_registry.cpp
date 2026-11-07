@@ -53,6 +53,11 @@ constexpr char MISSING_LAYER_LIBRARY[] = "./dvv_missing_validation_layer.dll";
 constexpr char PLATFORM_SURFACE_FUNCTION[] = "vkCreateWin32SurfaceKHR";
 constexpr WindowSystem OTHER_WINDOW_SYSTEM = WindowSystem::Xlib;
 constexpr char OTHER_SURFACE_EXTENSION[] = "VK_KHR_xlib_surface";
+#elif defined(__APPLE__)
+constexpr char MISSING_LAYER_LIBRARY[] = "./libdvv_missing_validation_layer.dylib";
+constexpr char PLATFORM_SURFACE_FUNCTION[] = "vkCreateMetalSurfaceEXT";
+constexpr WindowSystem OTHER_WINDOW_SYSTEM = WindowSystem::Xlib;
+constexpr char OTHER_SURFACE_EXTENSION[] = "VK_KHR_xlib_surface";
 #else
 constexpr char MISSING_LAYER_LIBRARY[] = "./libdvv_missing_validation_layer.so";
 constexpr char PLATFORM_SURFACE_FUNCTION[] = "vkCreateXlibSurfaceKHR";

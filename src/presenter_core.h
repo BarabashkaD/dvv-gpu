@@ -11,7 +11,6 @@
 
 #include <condition_variable>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -24,6 +23,7 @@
 
 #include "dvv/base/error.h"
 #include "dvv/base/executor.h"
+#include "dvv/base/move_only_function.h"
 #include "dvv/gpu/presenter.h"
 #include "presenter_logic.h"
 #include "vk.h"
@@ -57,7 +57,7 @@ class PresenterCore;
 class PresenterMailbox final : public IExecutor {
 public:
     explicit PresenterMailbox(PresenterCore& core) noexcept : core_(&core) {}
-    void post(std::move_only_function<void()> work) override;
+    void post(MoveOnlyFunction<void()> work) override;
 
 private:
     PresenterCore* core_;
@@ -92,7 +92,7 @@ public:
     [[nodiscard]] std::optional<Error> failure() const;
 
     // The mailbox: queues work for the presenter thread; throws std::bad_alloc when it cannot.
-    void post(std::move_only_function<void()> work);
+    void post(MoveOnlyFunction<void()> work);
     // Called by the frame's coroutine on the presenter thread when its submission has finished.
     void frameFinished(Result<std::uint64_t> result) noexcept;
 
@@ -156,7 +156,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable wake_;
     Requests requests_{};
-    std::vector<std::move_only_function<void()>> mailbox_;
+    std::vector<MoveOnlyFunction<void()>> mailbox_;
     PresenterStats stats_{};
     std::optional<Error> failure_;
 

@@ -120,12 +120,30 @@ Result<std::vector<const char*>> deviceExtensions(const GpuInfo& info, bool pres
 }
 
 Result<Enumeration> enumerateDevices(vk::Instance instance, const Dispatch& dispatch) {
-    const auto handles = instance.enumeratePhysicalDevices(dispatch);
-    DVV_TRY_VOID(vkCheck(handles.result, "vkEnumeratePhysicalDevices"));
+    // The two-call enumeration is written out: vulkan.hpp's wrapper leaves the count uninitialised
+    // when the call fails and asserts on it. A loader that reports VK_ERROR_INITIALIZATION_FAILED
+    // found no usable physical device (a macOS runner without a Metal device): no devices, not an
+    // error, so the caller can report that no usable device exists.
+    std::uint32_t count = 0;
+    std::vector<vk::PhysicalDevice> handles;
+    vk::Result result = vk::Result::eSuccess;
+    do {
+        count = 0;
+        result = instance.enumeratePhysicalDevices(&count, nullptr, dispatch);
+        if (result == vk::Result::eSuccess && count > 0) {
+            handles.resize(count);
+            result = instance.enumeratePhysicalDevices(&count, handles.data(), dispatch);
+        }
+    } while (result == vk::Result::eIncomplete);
+    if (result == vk::Result::eErrorInitializationFailed) {
+        return Enumeration{};
+    }
+    DVV_TRY_VOID(vkCheck(result, "vkEnumeratePhysicalDevices"));
+    handles.resize(count);
 
     Enumeration enumeration;
-    for (std::uint32_t index = 0; index < handles.value.size(); ++index) {
-        const vk::PhysicalDevice device = handles.value[index];
+    for (std::uint32_t index = 0; index < handles.size(); ++index) {
+        const vk::PhysicalDevice device = handles[index];
         const std::uint32_t api_version = device.getProperties(dispatch).apiVersion;
 
         vk::StructureChain<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceIDProperties,

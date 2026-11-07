@@ -62,6 +62,7 @@ TEST_CASE(
     CHECK(swapchainImageCount(imageCounts(1, 0)) == 2);
     CHECK(swapchainImageCount(imageCounts(2, 2)) == 2);
     CHECK(swapchainImageCount(imageCounts(3, 8)) == 4);
+    CHECK(swapchainImageCount(imageCounts(3, 3)) == 3);  // KosmicKrisp's Metal surface
 }
 
 TEST_CASE(

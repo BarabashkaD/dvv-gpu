@@ -6,6 +6,20 @@ the dvv rules: compatible = the same major and at least the minimum version, als
 changes only in a new major, after a deprecation. This file is the release notes (there are no
 GitHub Releases).
 
+## [0.2.0] - 2026-11-07
+
+### Added
+- macOS (Apple Silicon) support: the Vulkan loader is opened as `@rpath/libvulkan.1.dylib`
+  (resolved through the executable's rpath), presentation goes to a CAMetalLayer through
+  VK_EXT_metal_surface (KosmicKrisp, Vulkan 1.4).
+- macOS tests, including the layer-geometry check of the presentation surface.
+
+### Changed
+- The record, frame and error callbacks take `dvv::MoveOnlyFunction` (`std::move_only_function`
+  where available).
+- The swapchain image count respects surfaces whose minimum equals their maximum.
+- The CMake package requires dvv-base 0.2.0 and dvv-platform 0.2.0 or later in the 0.x series.
+
 ## [0.1.0] - 2026-10-28
 
 First versioned release.
