@@ -85,6 +85,44 @@ dvv::gpu::detail::PipelineCacheIdentity identityOf(const dvv::gpu::detail::Devic
     return identity;
 }
 
+// The size of the data the driver returns for a new, empty pipeline cache, asked directly (not
+// through dvv's PipelineCache, so a bug there cannot hide here). A conforming driver returns at
+// least the 32-byte VkPipelineCacheHeaderVersionOne. Mesa's lavapipe 26.2 returns 20: its
+// lvp_GetPipelineCacheData writes the whole header but sets *pDataSize to 5 * sizeof(uint32_t), so
+// a cache it wrote never loads again. On such a driver the round-trip checks below only check that
+// dvv rejects the data.
+constexpr std::size_t CACHE_HEADER_BYTES = 32;
+std::size_t driverCacheBytes(const dvv::gpu::detail::DeviceCore& core) {
+    const vk::Device device = core.device();
+    const auto cache =
+        device.createPipelineCache(vk::PipelineCacheCreateInfo{}, nullptr, core.dispatch());
+    REQUIRE(cache.result == vk::Result::eSuccess);
+    std::size_t size = 0;
+    const vk::Result queried =
+        device.getPipelineCacheData(cache.value, &size, nullptr, core.dispatch());
+    std::vector<std::byte> data(size);
+    const vk::Result fetched =
+        device.getPipelineCacheData(cache.value, &size, data.data(), core.dispatch());
+    device.destroyPipelineCache(cache.value, nullptr, core.dispatch());
+    REQUIRE(queried == vk::Result::eSuccess);
+    REQUIRE((fetched == vk::Result::eSuccess || fetched == vk::Result::eIncomplete));
+    return size;
+}
+
+// True when the driver returns whole pipeline cache headers; otherwise notes why a round trip is
+// not checked.
+bool driverKeepsPipelineCaches(const dvv::gpu::detail::DeviceCore& core) {
+    const std::size_t bytes = driverCacheBytes(core);
+    if (bytes >= CACHE_HEADER_BYTES) {
+        return true;
+    }
+    MESSAGE("the driver returns " << bytes << " bytes for an empty pipeline cache, less than its "
+                                  << CACHE_HEADER_BYTES
+                                  << "-byte header (a driver bug, e.g. Mesa lavapipe 26.2): the "
+                                  << "round trip is not checked, only that dvv rejects the data");
+    return false;
+}
+
 }  // namespace
 
 TEST_CASE_FIXTURE(GpuTest, "a compute pipeline is made from an embedded shader") {
@@ -208,10 +246,15 @@ TEST_CASE_FIXTURE(GpuTest, "the pipeline cache is saved and loaded again") {
         REQUIRE(ctx->savePipelineCache().has_value());
         REQUIRE(std::filesystem::exists(file));
         const std::vector<std::byte> saved = driverData(readFile(file));
-        CHECK(saved.size() >= 32);
+        CHECK(temporaryFiles(folder.path()) == 0);
+        if (!driverKeepsPipelineCaches(Access::core(*ctx))) {
+            CHECK(dvv::gpu::detail::pipelineCacheMismatch(saved, identityOf(Access::core(*ctx)))
+                      .has_value());
+            return;
+        }
+        CHECK(saved.size() >= CACHE_HEADER_BYTES);
         CHECK(dvv::gpu::detail::pipelineCacheMismatch(saved, identityOf(Access::core(*ctx))) ==
               std::nullopt);
-        CHECK(temporaryFiles(folder.path()) == 0);
         std::filesystem::remove(file);
     }  // the context saves the cache again when it closes: the file is missing
     REQUIRE(std::filesystem::exists(file));
@@ -247,6 +290,7 @@ TEST_CASE_FIXTURE(GpuTest, "a corrupt, damaged or foreign pipeline cache file is
         stream << "not a pipeline cache, but long enough to have a header";
     }
     std::vector<std::byte> saved;
+    bool keeps = true;
     {
         auto ctx =
             registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
@@ -255,12 +299,22 @@ TEST_CASE_FIXTURE(GpuTest, "a corrupt, damaged or foreign pipeline cache file is
         CHECK(ctx->createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).has_value());
         REQUIRE(ctx->savePipelineCache().has_value());  // replaces the corrupt file
         saved = driverData(readFile(file));
-        CHECK(dvv::gpu::detail::pipelineCacheMismatch(saved, identityOf(Access::core(*ctx))) ==
-              std::nullopt);
+        keeps = driverKeepsPipelineCaches(Access::core(*ctx));
+        if (keeps) {
+            CHECK(dvv::gpu::detail::pipelineCacheMismatch(saved, identityOf(Access::core(*ctx))) ==
+                  std::nullopt);
+        } else {
+            CHECK(dvv::gpu::detail::pipelineCacheMismatch(saved, identityOf(Access::core(*ctx)))
+                      .has_value());
+        }
+    }
+    // The damaged and foreign files below are made from a whole header the driver wrote.
+    if (!keeps) {
+        return;
     }
 
     // A damaged payload behind an intact header: the checksum no longer matches.
-    REQUIRE(saved.size() >= 32);
+    REQUIRE(saved.size() >= CACHE_HEADER_BYTES);
     std::vector<std::byte> damaged = saved;
     dvv::gpu::detail::appendPipelineCacheTrailer(damaged);
     damaged[saved.size() - 1] ^= std::byte{0x01};
@@ -313,9 +367,12 @@ TEST_CASE_FIXTURE(GpuTest, "concurrent saves to one pipeline cache file leave a 
     CHECK(failed[0] == 0);
     CHECK(failed[1] == 0);
     CHECK(temporaryFiles(folder.path()) == 0);
+    // driverData() checks that the file is complete: its dvv trailer matches the data.
     const std::vector<std::byte> saved = driverData(readFile(file));
-    CHECK(dvv::gpu::detail::pipelineCacheMismatch(saved, identityOf(Access::core(*contexts[0]))) ==
-          std::nullopt);
+    if (driverKeepsPipelineCaches(Access::core(*contexts[0]))) {
+        CHECK(dvv::gpu::detail::pipelineCacheMismatch(
+                  saved, identityOf(Access::core(*contexts[0]))) == std::nullopt);
+    }
 }
 
 TEST_CASE_FIXTURE(GpuTest, "without a file the pipeline cache stays in memory") {

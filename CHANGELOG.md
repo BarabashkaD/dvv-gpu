@@ -6,6 +6,15 @@ the dvv rules: compatible = the same major and at least the minimum version, als
 changes only in a new major, after a deprecation. This file is the release notes (there are no
 GitHub Releases).
 
+## [0.2.1] - 2026-11-08
+
+### Fixed
+- The pipeline cache tests pass on a driver that returns a truncated cache header. Mesa's lavapipe
+  26.2 (macOS CI, from Homebrew) writes the 32-byte header but reports 20 bytes
+  (`lvp_GetPipelineCacheData`), so its caches never load again; dvv already rejected such data.
+  The tests now ask the driver directly and, on such a driver, check only that dvv rejects the
+  data instead of a round trip. No library code changed.
+
 ## [0.2.0] - 2026-11-07
 
 ### Added
