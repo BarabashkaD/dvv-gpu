@@ -6,8 +6,10 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -82,6 +84,32 @@ auto environmentOf(std::map<std::string, std::string> variables) {
     };
 }
 
+// bundledDriverSetting's result; an error fails the test case and gives an empty setting.
+DriverSetting settingFor(
+    std::span<const std::filesystem::path> manifests,
+    const std::function<std::optional<std::string>(std::string_view)>& get_env) {
+    dvv::Result<DriverSetting> setting = bundledDriverSetting(manifests, get_env);
+    if (!setting) {
+        FAIL_CHECK(setting.error().message);
+    }
+    return std::move(setting).value_or(DriverSetting{});
+}
+
+// A folder in `parent` whose name holds the OS list separator.
+std::filesystem::path folderWithSeparator(const std::filesystem::path& parent) {
+    const std::filesystem::path folder = parent / std::format("a{}b", SEP);
+    std::filesystem::create_directories(folder);
+    return folder;
+}
+
+// The message for a manifest whose path holds the list separator.
+std::string separatorMessage(const std::filesystem::path& manifest) {
+    return std::format(
+        "the driver manifest '{}' contains the list separator '{}', so VK_DRIVER_FILES cannot "
+        "name it",
+        dvv::pathDisplayText(manifest), SEP);
+}
+
 // Saves one environment variable and restores it at the end of the scope. A variable that was set
 // to "" comes back unset: dvv-base sets no empty value, and the loader treats both the same.
 class RestoredVariable {
@@ -126,7 +154,7 @@ TEST_CASE("the existing manifests are joined with the OS list separator") {
     const TemporaryFolder folder;
     const std::array manifests{writeManifest(folder.path() / "a.json"),
                                writeManifest(folder.path() / "b.json")};
-    const DriverSetting setting = bundledDriverSetting(manifests, environmentOf({}));
+    const DriverSetting setting = settingFor(manifests, environmentOf({}));
     CHECK(setting.choice == DriverChoice::Bundled);
     CHECK(setting.value == dvv::pathText(manifests[0]) + SEP + dvv::pathText(manifests[1]));
 }
@@ -136,7 +164,7 @@ TEST_CASE("VK_DRIVER_FILES and VK_ICD_FILENAMES win") {
     const std::array manifests{writeManifest(folder.path() / "a.json")};
     for (const char* name : {"VK_DRIVER_FILES", "VK_ICD_FILENAMES"}) {
         CAPTURE(name);
-        const DriverSetting setting = bundledDriverSetting(manifests, environmentOf({{name, "x"}}));
+        const DriverSetting setting = settingFor(manifests, environmentOf({{name, "x"}}));
         CHECK(setting.choice == DriverChoice::UserChoice);
         CHECK(setting.value.empty());
     }
@@ -145,8 +173,8 @@ TEST_CASE("VK_DRIVER_FILES and VK_ICD_FILENAMES win") {
 TEST_CASE("empty variables count as unset") {
     const TemporaryFolder folder;
     const std::array manifests{writeManifest(folder.path() / "a.json")};
-    const DriverSetting setting = bundledDriverSetting(
-        manifests, environmentOf({{"VK_DRIVER_FILES", ""}, {"VK_ICD_FILENAMES", ""}}));
+    const DriverSetting setting =
+        settingFor(manifests, environmentOf({{"VK_DRIVER_FILES", ""}, {"VK_ICD_FILENAMES", ""}}));
     CHECK(setting.choice == DriverChoice::Bundled);
     CHECK(setting.value == dvv::pathText(manifests[0]));
 }
@@ -156,12 +184,12 @@ TEST_CASE("missing manifests are skipped; none left gives NoManifest") {
     const std::filesystem::path present = writeManifest(folder.path() / "a.json");
     const std::array some{folder.path() / "missing.json", present,
                           folder.path() / "also-missing.json"};
-    const DriverSetting found = bundledDriverSetting(some, environmentOf({}));
+    const DriverSetting found = settingFor(some, environmentOf({}));
     CHECK(found.choice == DriverChoice::Bundled);
     CHECK(found.value == dvv::pathText(present));
 
     const std::array none{folder.path() / "missing.json"};
-    const DriverSetting missing = bundledDriverSetting(none, environmentOf({}));
+    const DriverSetting missing = settingFor(none, environmentOf({}));
     CHECK(missing.choice == DriverChoice::NoManifest);
     CHECK(missing.value.empty());
 }
@@ -171,11 +199,11 @@ TEST_CASE("a manifest that is a folder is skipped; an empty list gives NoManifes
     const std::filesystem::path not_a_file = folder.path() / "c.json";
     std::filesystem::create_directories(not_a_file);
     const std::array manifests{not_a_file, writeManifest(folder.path() / "a.json")};
-    const DriverSetting setting = bundledDriverSetting(manifests, environmentOf({}));
+    const DriverSetting setting = settingFor(manifests, environmentOf({}));
     CHECK(setting.choice == DriverChoice::Bundled);
     CHECK(setting.value == dvv::pathText(manifests[1]));
 
-    const DriverSetting empty = bundledDriverSetting({}, environmentOf({}));
+    const DriverSetting empty = settingFor({}, environmentOf({}));
     CHECK(empty.choice == DriverChoice::NoManifest);
     CHECK(empty.value.empty());
 }
@@ -185,9 +213,48 @@ TEST_CASE("a non-ASCII path keeps its path text") {
     const std::filesystem::path bundle = folder.path() / std::filesystem::path(u8"é 日本");
     std::filesystem::create_directories(bundle);
     const std::array manifests{writeManifest(bundle / "icd.json")};
-    const DriverSetting setting = bundledDriverSetting(manifests, environmentOf({}));
+    const DriverSetting setting = settingFor(manifests, environmentOf({}));
     CHECK(setting.choice == DriverChoice::Bundled);
     CHECK(setting.value == dvv::pathText(manifests[0]));
+}
+
+TEST_CASE("a manifest path with the list separator gives Errc::Unsupported") {
+    const TemporaryFolder folder;
+    const std::filesystem::path bundle = folderWithSeparator(folder.path());
+    const std::array manifests{writeManifest(folder.path() / "a.json"),
+                               writeManifest(bundle / "icd.json")};
+    const dvv::Result<DriverSetting> setting = bundledDriverSetting(manifests, environmentOf({}));
+    REQUIRE_FALSE(setting.has_value());
+    if (!setting) {
+        CHECK(setting.error().code == dvv::Errc::Unsupported);
+        CHECK(setting.error().message == separatorMessage(manifests[1]));
+    }
+}
+
+TEST_CASE("a missing manifest with the list separator is skipped; a user choice still wins") {
+    const TemporaryFolder folder;
+    const std::filesystem::path bundle = folderWithSeparator(folder.path());
+    const std::array missing{bundle / "missing.json", writeManifest(folder.path() / "a.json")};
+    const DriverSetting found = settingFor(missing, environmentOf({}));
+    CHECK(found.choice == DriverChoice::Bundled);
+    CHECK(found.value == dvv::pathText(missing[1]));
+
+    const std::array present{writeManifest(bundle / "icd.json")};
+    const DriverSetting user = settingFor(present, environmentOf({{"VK_DRIVER_FILES", "x"}}));
+    CHECK(user.choice == DriverChoice::UserChoice);
+}
+
+TEST_CASE("useBundledDrivers sets nothing for a manifest path with the list separator") {
+    const TemporaryFolder folder;
+    const std::array manifests{writeManifest(folderWithSeparator(folder.path()) / "icd.json")};
+    const ClearedDriverVariables cleared;
+    const dvv::Result<DriverChoice> choice = useBundledDrivers(manifests);
+    REQUIRE_FALSE(choice.has_value());
+    if (!choice) {
+        CHECK(choice.error().code == dvv::Errc::Unsupported);
+        CHECK(choice.error().message == separatorMessage(manifests[0]));
+    }
+    CHECK(dvv::getEnvironment("VK_DRIVER_FILES") == std::nullopt);
 }
 
 TEST_CASE("useBundledDrivers sets VK_DRIVER_FILES") {

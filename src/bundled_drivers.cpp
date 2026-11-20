@@ -1,6 +1,7 @@
 #include "bundled_drivers.h"
 
 #include <cassert>
+#include <format>
 #include <system_error>
 
 #include "dvv/base/environment.h"
@@ -25,11 +26,11 @@ bool isSet(const std::function<std::optional<std::string>(std::string_view)>& ge
 
 }  // namespace
 
-DriverSetting bundledDriverSetting(
+Result<DriverSetting> bundledDriverSetting(
     std::span<const std::filesystem::path> manifests,
     const std::function<std::optional<std::string>(std::string_view)>& get_env) {
     if (isSet(get_env, "VK_DRIVER_FILES") || isSet(get_env, "VK_ICD_FILENAMES")) {
-        return {.choice = DriverChoice::UserChoice};
+        return DriverSetting{.choice = DriverChoice::UserChoice};
     }
     DriverSetting setting;
     for (const std::filesystem::path& manifest : manifests) {
@@ -37,10 +38,18 @@ DriverSetting bundledDriverSetting(
         if (!std::filesystem::is_regular_file(manifest, error)) {
             continue;
         }
+        const std::string text = pathText(manifest);
+        // The loader splits the value at every separator, and a separator cannot be escaped.
+        if (text.find(LIST_SEPARATOR) != std::string::npos) {
+            return makeError(Errc::Unsupported,
+                             std::format("the driver manifest '{}' contains the list separator "
+                                         "'{}', so VK_DRIVER_FILES cannot name it",
+                                         pathDisplayText(manifest), LIST_SEPARATOR));
+        }
         if (setting.choice == DriverChoice::Bundled) {
             setting.value += LIST_SEPARATOR;
         }
-        setting.value += pathText(manifest);
+        setting.value += text;
         setting.choice = DriverChoice::Bundled;
     }
     return setting;
@@ -49,7 +58,8 @@ DriverSetting bundledDriverSetting(
 }  // namespace detail
 
 Result<DriverChoice> useBundledDrivers(std::span<const std::filesystem::path> manifests) {
-    const detail::DriverSetting setting = detail::bundledDriverSetting(manifests, getEnvironment);
+    DVV_TRY(const detail::DriverSetting setting,
+            detail::bundledDriverSetting(manifests, getEnvironment));
     if (setting.choice == DriverChoice::Bundled) {
         // setEnvironment would remove the variable for an empty value; a Bundled value names at
         // least one manifest, whose path text is not empty.

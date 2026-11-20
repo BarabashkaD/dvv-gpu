@@ -20,6 +20,9 @@ enum class DriverChoice : std::uint8_t {
 // empty value counts as unset, as for the loader). Manifests that are not regular files are
 // skipped. Call it before any other thread starts and before the first GpuInstance::create: it
 // sets a process environment variable, which is not synchronised (dvv/base/environment.h).
+// Errc::Unsupported, and nothing set, when an existing manifest's path contains the OS list
+// separator (';' on Windows, ':' elsewhere; on macOS a '/' typed in a Finder name is a ':' in the
+// path): the loader would split the value there. Bundle the drivers under a path without one.
 // Errc::Internal when the variable cannot be set: on Windows when the joined value is 32767 UTF-16
 // units or longer, on Linux when a manifest's path text is not valid UTF-8. The Vulkan loader
 // ignores the variable in an elevated process (a Windows administrator, a setuid program on Linux).

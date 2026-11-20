@@ -26,7 +26,9 @@ GitHub Releases).
   `MappedRead` and `MappedWrite` for headers that hold them by pointer. Declare `GpuInstance`
   ahead through this header, not with your own `class GpuInstance;`.
 - `dvv/gpu/bundled_drivers.h`: `useBundledDrivers(manifests)` points the Vulkan loader at bundled
-  driver manifests unless the user chose drivers.
+  driver manifests unless the user chose drivers, and returns a `DriverChoice`. A manifest whose
+  path contains the list separator (`;` on Windows, `:` elsewhere) gives `Errc::Unsupported`: the
+  loader would split the value there.
 - `BufferCopy` and `GroupCount` forms of `CommandRecorder::copyBuffer` and `dispatch`;
   `Presenter::show()` and `hide()`.
 - dvv-gpu creates its Vulkan surfaces itself.
