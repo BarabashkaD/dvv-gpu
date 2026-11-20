@@ -325,6 +325,10 @@ void PresenterCore::run() noexcept {
             fail(makeError(Errc::Internal, std::format("presenter '{}': {}", name_, error.what()))
                      .error());
             logic_.acquired(VkOutcome::OtherError);
+        } catch (...) {
+            fail(makeError(Errc::Internal, std::format("presenter '{}': unknown exception", name_))
+                     .error());
+            logic_.acquired(VkOutcome::OtherError);
         }
         publishState();
     }
@@ -413,6 +417,11 @@ Result<PresentFrame> PresenterCore::callProvider(const PresentFrameInfo& info) {
         return makeError(Errc::Internal, std::format("the frame provider of presenter '{}' "
                                                      "threw: {}",
                                                      name_, error.what()));
+    } catch (...) {
+        return makeError(Errc::Internal,
+                         std::format("the frame provider of presenter '{}' threw an unknown "
+                                     "exception",
+                                     name_));
     }
 }
 
@@ -514,6 +523,9 @@ void PresenterCore::startFrame(PresentFrame frame, std::uint32_t index) noexcept
     } catch (const std::exception& error) {
         completion_ = makeError(Errc::Internal,
                                 std::format("starting a presenter frame failed: {}", error.what()));
+    } catch (...) {
+        completion_ =
+            makeError(Errc::Internal, "starting a presenter frame failed: unknown exception");
     }
     processCompletion();  // a frame that could not be queued has completed already
 }

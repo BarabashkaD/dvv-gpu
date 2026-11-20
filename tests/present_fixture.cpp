@@ -45,6 +45,9 @@ FrameProvider testFrameProvider(std::shared_ptr<ExecutionContext> context,
         if (control->failNext.exchange(false)) {
             return makeError(Errc::Io, "injected provider failure");
         }
+        if (control->throwNext.exchange(false)) {
+            throw 42;
+        }
         if (control->newImage.exchange(false) || !image || info.extent != extent) {
             const std::uint64_t size =
                 static_cast<std::uint64_t>(info.extent.width) * info.extent.height * 4;

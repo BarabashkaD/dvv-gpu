@@ -25,6 +25,7 @@ namespace dvv::gpu::test {
 struct ProviderControl {
     std::atomic<std::uint64_t> calls{0};
     std::atomic<bool> failNext{false};            // the next call returns Errc::Io
+    std::atomic<bool> throwNext{false};           // the next call throws a non-std exception
     std::atomic<bool> withoutTransferSrc{false};  // the image lacks TRANSFER_SRC usage
     std::atomic<bool> integerFormat{false};       // the image is R8G8B8A8_UINT (not blittable)
     std::atomic<bool> newImage{false};            // the next call makes its buffer and image anew

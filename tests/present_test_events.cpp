@@ -146,6 +146,27 @@ TEST_CASE_FIXTURE(PresentTest, "a provider error is reported once and the next f
     CHECK(errors().size() == 1);
 }
 
+TEST_CASE_FIXTURE(PresentTest, "a provider that throws a non-std exception skips the frame") {
+    const std::unique_ptr<Presenter> p = makePresenter();
+    presentFirstFrame(window(), *p);
+    control().throwNext = true;
+    p->requestFrame();
+    REQUIRE(pumpUntil(window(), [&] { return errors().size() >= 1; }));
+    CHECK(errors().size() == 1);
+    const auto reported = errors().errors();
+    REQUIRE(reported.size() == 1);
+    CHECK(reported[0].code == Errc::Internal);
+    INFO(reported[0].message);
+    CHECK(reported[0].message.find("unknown exception") != std::string::npos);
+    CHECK(p->stats().frameErrors == 1);
+    const std::uint64_t n = p->stats().framesPresented;
+    REQUIRE(pumpUntil(window(), [&] {
+        p->requestFrame();
+        return p->stats().framesPresented > n;
+    }));
+    CHECK_FALSE(p->failure());
+}
+
 // Design M1b §8.2 case 8: two presenter threads share the context's queue lock and submit thread.
 // Windows has no TSan (U-WIN): this case runs under vs2026-asan.
 TEST_CASE_FIXTURE(PresentTest, "two presenters on one context present concurrently") {
