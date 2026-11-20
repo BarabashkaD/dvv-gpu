@@ -31,8 +31,20 @@ void Presenter::resize(platform::PixelSize extent) noexcept {
     core_->resize(extent);
 }
 
+void Presenter::show() noexcept {
+    core_->setVisible(true);
+}
+
+void Presenter::hide() noexcept {
+    core_->setVisible(false);
+}
+
 void Presenter::setVisible(bool visible) noexcept {
-    core_->setVisible(visible);
+    if (visible) {
+        show();
+    } else {
+        hide();
+    }
 }
 
 void Presenter::requestFrame() noexcept {

@@ -61,11 +61,15 @@ CommandRecorder::CommandRecorder(detail::DeviceCore& core, VkCommandBuffer comma
     : core_(&core), command_buffer_(command_buffer) {}
 
 void CommandRecorder::dispatch(const ComputePipeline& pipeline,
+                               std::span<const std::byte> push_constants, GroupCount groups) {
+    dispatch(pipeline, push_constants, std::span<GpuImage* const>{}, groups);
+}
+
+void CommandRecorder::dispatch(const ComputePipeline& pipeline,
                                std::span<const std::byte> push_constants,
                                std::uint32_t group_count_x, std::uint32_t group_count_y,
                                std::uint32_t group_count_z) {
-    dispatch(pipeline, push_constants, std::span<GpuImage* const>{}, group_count_x, group_count_y,
-             group_count_z);
+    dispatch(pipeline, push_constants, GroupCount{group_count_x, group_count_y, group_count_z});
 }
 
 void CommandRecorder::dispatch(const ComputePipeline& pipeline,
@@ -73,6 +77,13 @@ void CommandRecorder::dispatch(const ComputePipeline& pipeline,
                                std::span<GpuImage* const> storage_images,
                                std::uint32_t group_count_x, std::uint32_t group_count_y,
                                std::uint32_t group_count_z) {
+    dispatch(pipeline, push_constants, storage_images,
+             GroupCount{group_count_x, group_count_y, group_count_z});
+}
+
+void CommandRecorder::dispatch(const ComputePipeline& pipeline,
+                               std::span<const std::byte> push_constants,
+                               std::span<GpuImage* const> storage_images, GroupCount groups) {
     if (!usable()) {
         return;
     }
@@ -91,12 +102,12 @@ void CommandRecorder::dispatch(const ComputePipeline& pipeline,
                         pipeline.pushConstantSize(), push_constants.size())));
         return;
     }
-    if (group_count_x < 1 || group_count_y < 1 || group_count_z < 1 || group_count_x > max[0] ||
-        group_count_y > max[1] || group_count_z > max[2]) {
-        static_cast<void>(check(
-            false, "dispatch",
-            std::format("the group counts {}x{}x{} must be at least 1 and at most {}x{}x{}",
-                        group_count_x, group_count_y, group_count_z, max[0], max[1], max[2])));
+    if (groups.x < 1 || groups.y < 1 || groups.z < 1 || groups.x > max[0] || groups.y > max[1] ||
+        groups.z > max[2]) {
+        static_cast<void>(
+            check(false, "dispatch",
+                  std::format("the group counts {}x{}x{} must be at least 1 and at most {}x{}x{}",
+                              groups.x, groups.y, groups.z, max[0], max[1], max[2])));
         return;
     }
     if (storage_images.size() != pipeline.bindings().storageImages) {
@@ -144,7 +155,7 @@ void CommandRecorder::dispatch(const ComputePipeline& pipeline,
                                          .pValues = push_constants.data()};
         commands.pushConstants2(push, core_->dispatch());
     }
-    commands.dispatch(group_count_x, group_count_y, group_count_z, core_->dispatch());
+    commands.dispatch(groups.x, groups.y, groups.z, core_->dispatch());
 }
 
 void CommandRecorder::fillBuffer(const GpuBuffer& buffer, std::uint32_t value, std::uint64_t offset,
@@ -168,12 +179,21 @@ void CommandRecorder::fillBuffer(const GpuBuffer& buffer, std::uint32_t value, s
 }
 
 void CommandRecorder::copyBuffer(const GpuBuffer& source, const GpuBuffer& destination) {
-    copyBuffer(source, 0, destination, 0, source.size());
+    copyBuffer(source, destination,
+               {.sourceOffset = 0, .destinationOffset = 0, .size = source.size()});
 }
 
 void CommandRecorder::copyBuffer(const GpuBuffer& source, std::uint64_t source_offset,
                                  const GpuBuffer& destination, std::uint64_t destination_offset,
                                  std::uint64_t size) {
+    copyBuffer(
+        source, destination,
+        {.sourceOffset = source_offset, .destinationOffset = destination_offset, .size = size});
+}
+
+void CommandRecorder::copyBuffer(const GpuBuffer& source, const GpuBuffer& destination,
+                                 BufferCopy region) {
+    const auto [source_offset, destination_offset, size] = region;
     if (!usable()) {
         return;
     }
@@ -187,10 +207,10 @@ void CommandRecorder::copyBuffer(const GpuBuffer& source, std::uint64_t source_o
         return;
     }
     barrier();
-    const vk::BufferCopy region{
+    const vk::BufferCopy vk_region{
         .srcOffset = source_offset, .dstOffset = destination_offset, .size = size};
     vk::CommandBuffer(command_buffer_)
-        .copyBuffer(vk::Buffer(source.handle()), vk::Buffer(destination.handle()), region,
+        .copyBuffer(vk::Buffer(source.handle()), vk::Buffer(destination.handle()), vk_region,
                     core_->dispatch());
 }
 

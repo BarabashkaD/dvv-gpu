@@ -45,6 +45,20 @@ struct RawCommands {
     PFN_vkGetDeviceProcAddr getDeviceProcAddr = nullptr;
 };
 
+// A byte range to copy between two buffers (CommandRecorder::copyBuffer).
+struct BufferCopy {
+    std::uint64_t sourceOffset = 0;
+    std::uint64_t destinationOffset = 0;
+    std::uint64_t size = 0;  // bytes; 0 fails the recorder ("the size is 0")
+};
+
+// Work groups of a dispatch; each count is 1 to the device's maxComputeWorkGroupCount.
+struct GroupCount {
+    std::uint32_t x = 1;
+    std::uint32_t y = 1;
+    std::uint32_t z = 1;
+};
+
 class CommandRecorder {
 public:
     CommandRecorder(const CommandRecorder&) = delete;
@@ -53,19 +67,25 @@ public:
     CommandRecorder& operator=(CommandRecorder&&) = delete;
     ~CommandRecorder() = default;
 
-    // Runs the pipeline's shader on group_count_x x y x z work groups with these push-constant
-    // bytes, which must be exactly the pipeline's push-constant size (std::as_bytes of the
-    // shader's push-constant struct). Group counts are 1 to the device's maxComputeWorkGroupCount.
+    // Runs the pipeline's shader on `groups` work groups with these push-constant bytes, which
+    // must be exactly the pipeline's push-constant size (std::as_bytes of the shader's
+    // push-constant struct). Group counts are 1 to the device's maxComputeWorkGroupCount.
     // The pipeline must bind no storage images.
     void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
-                  std::uint32_t group_count_x, std::uint32_t group_count_y = 1,
-                  std::uint32_t group_count_z = 1);
+                  GroupCount groups);
     // As dispatch() above, and binds exactly pipeline.bindings().storageImages images, binding i =
     // storage_images[i]. Each image belongs to this device and generation, has STORAGE usage and
     // appears once. Images not yet in GENERAL move there in the automatic barrier (tracked like
     // every GpuImage layout); then the descriptors are pushed (vkCmdPushDescriptorSet, set 0) and
     // the dispatch is recorded. Otherwise the recorder fails (Errc::Internal). A bound image is
     // writable by the shader: do not bind an image others read (M4 adds read-only bindings).
+    void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
+                  std::span<GpuImage* const> storage_images, GroupCount groups);
+    // Deprecated, kept until 1.0.0: the trailing-count forms of the two dispatch() overloads
+    // above; they forward to them with GroupCount{x, y, z}.
+    void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
+                  std::uint32_t group_count_x, std::uint32_t group_count_y = 1,
+                  std::uint32_t group_count_z = 1);
     void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
                   std::span<GpuImage* const> storage_images, std::uint32_t group_count_x,
                   std::uint32_t group_count_y = 1, std::uint32_t group_count_z = 1);
@@ -76,7 +96,10 @@ public:
                     std::uint64_t size = VK_WHOLE_SIZE);
     // Copies the whole source buffer to the start of the destination.
     void copyBuffer(const GpuBuffer& source, const GpuBuffer& destination);
-    // Copies `size` bytes. Source needs TRANSFER_SRC, destination TRANSFER_DST usage.
+    // Copies region.size bytes. Source needs TRANSFER_SRC, destination TRANSFER_DST usage.
+    void copyBuffer(const GpuBuffer& source, const GpuBuffer& destination, BufferCopy region);
+    // Deprecated, kept until 1.0.0: the five-value form of the BufferCopy overload above; it
+    // forwards to it.
     void copyBuffer(const GpuBuffer& source, std::uint64_t source_offset,
                     const GpuBuffer& destination, std::uint64_t destination_offset,
                     std::uint64_t size);

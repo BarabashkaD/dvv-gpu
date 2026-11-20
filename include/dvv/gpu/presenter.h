@@ -99,7 +99,7 @@ struct PresenterStats {
 
 // Presents to one native window on its own thread (spec §4): acquire, hand the frame's commands to
 // the submit thread, present, recreate the swapchain on resize/out-of-date/suboptimal. Created by
-// createPresenter (presenter_vulkan.h); keeps the context alive. resize, setVisible, requestFrame
+// createPresenter (presenter_vulkan.h); keeps the context alive. resize, show, hide, requestFrame
 // and stats may be called from any thread.
 // On Windows: create and destroy the presenter on the window's thread. While a presenter of this
 // context lives, do not call ExecutionContext::drain() on the window's thread.
@@ -113,8 +113,11 @@ public:
     ~Presenter();
 
     void resize(platform::PixelSize extent) noexcept;  // hint; latest wins; requests a frame
-    void setVisible(bool visible) noexcept;  // hidden: no frames, no acquires; requests a frame
-    void requestFrame() noexcept;            // coalesced until the next frame starts
+    void show() noexcept;                              // frames again; requests a frame
+    void hide() noexcept;                              // no frames, no acquires; requests a frame
+    // Deprecated, kept until 1.0.0: show() when `visible`, hide() otherwise.
+    void setVisible(bool visible) noexcept;
+    void requestFrame() noexcept;  // coalesced until the next frame starts
     [[nodiscard]] PresenterStats stats() const;
     [[nodiscard]] std::optional<Error> failure() const;  // why presenting stopped
     [[nodiscard]] const std::shared_ptr<ExecutionContext>& context() const noexcept {

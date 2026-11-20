@@ -29,6 +29,7 @@ using dvv::gpu::CommandRecorder;
 using dvv::gpu::ComputeBindings;
 using dvv::gpu::GpuBuffer;
 using dvv::gpu::GpuImage;
+using dvv::gpu::GroupCount;
 using dvv::gpu::ImageDesc;
 using dvv::gpu::MappedRead;
 using dvv::gpu::MemoryUsage;
@@ -110,7 +111,7 @@ TEST_CASE_FIXTURE(GpuTest, "a compute shader writes a storage image through a pu
     GpuImage* raw = image.get();
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
                 recorder.dispatch(*pipeline, std::as_bytes(std::span(&push, 1)), {&raw, 1},
-                                  groups(WIDTH), groups(HEIGHT));
+                                  {groups(WIDTH), groups(HEIGHT)});
                 // A copy would read the image in GENERAL; the explicit move lets the next dispatch
                 // bring it back to GENERAL.
                 recorder.transition(*image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -124,7 +125,7 @@ TEST_CASE_FIXTURE(GpuTest, "a compute shader writes a storage image through a pu
 
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
                 recorder.dispatch(*pipeline, std::as_bytes(std::span(&push, 1)), {&raw, 1},
-                                  groups(WIDTH), groups(HEIGHT));
+                                  {groups(WIDTH), groups(HEIGHT)});
             }).has_value());
     CHECK(vulkanLayout(*image) == VK_IMAGE_LAYOUT_GENERAL);
 }
@@ -147,7 +148,7 @@ TEST_CASE_FIXTURE(GpuTest, "two storage images in one dispatch") {
     const std::array<GpuImage*, 2> images{first.get(), second.get()};
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
                 recorder.dispatch(*pipeline, std::as_bytes(std::span(&push, 1)), images,
-                                  groups(SIZE), groups(SIZE));
+                                  {groups(SIZE), groups(SIZE)});
                 recorder.copyImageToBuffer(*first, *first_texels);
                 recorder.copyImageToBuffer(*second, *second_texels);
             }).has_value());
@@ -170,7 +171,7 @@ TEST_CASE_FIXTURE(GpuTest, "an image appears once per dispatch") {
 
     const std::array<GpuImage*, 2> both{a.get(), a.get()};
     const auto twice = submitAndWait([&](CommandRecorder& recorder) {
-        recorder.dispatch(*pipeline, std::as_bytes(std::span(&push, 1)), both, 1, 1);
+        recorder.dispatch(*pipeline, std::as_bytes(std::span(&push, 1)), both, GroupCount{1, 1});
     });
     REQUIRE_FALSE(twice.has_value());
     CHECK(twice.error().code == dvv::Errc::Internal);
@@ -192,7 +193,7 @@ TEST_CASE_FIXTURE(GpuTest, "dispatch binds exactly the pipeline's storage images
     const std::array<std::byte, ADD_ONE_PUSH_SIZE> add_one_push{};
 
     const auto none = submitAndWait([&](CommandRecorder& recorder) {
-        recorder.dispatch(*write_image, std::as_bytes(std::span(&push, 1)), 1);
+        recorder.dispatch(*write_image, std::as_bytes(std::span(&push, 1)), GroupCount{1});
     });
     REQUIRE_FALSE(none.has_value());
     CHECK(none.error().code == dvv::Errc::Internal);
@@ -200,7 +201,7 @@ TEST_CASE_FIXTURE(GpuTest, "dispatch binds exactly the pipeline's storage images
 
     GpuImage* raw = image.get();
     const auto extra = submitAndWait([&](CommandRecorder& recorder) {
-        recorder.dispatch(*add_one, add_one_push, {&raw, 1}, 1);
+        recorder.dispatch(*add_one, add_one_push, {&raw, 1}, GroupCount{1});
     });
     REQUIRE_FALSE(extra.has_value());
     CHECK(extra.error().code == dvv::Errc::Internal);
@@ -221,7 +222,8 @@ TEST_CASE_FIXTURE(GpuTest, "a storage image needs STORAGE usage") {
 
     GpuImage* raw = image.get();
     const auto result = submitAndWait([&](CommandRecorder& recorder) {
-        recorder.dispatch(*pipeline, std::as_bytes(std::span(&push, 1)), {&raw, 1}, 1, 1);
+        recorder.dispatch(*pipeline, std::as_bytes(std::span(&push, 1)), {&raw, 1},
+                          GroupCount{1, 1});
     });
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().code == dvv::Errc::Internal);

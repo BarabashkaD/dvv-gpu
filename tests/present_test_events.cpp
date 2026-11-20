@@ -85,7 +85,7 @@ TEST_CASE_FIXTURE(PresentTest, "minimise and restore") {
     CHECK_FALSE(p->stats().failed);
 #endif
     // As the GUI does on every platform.
-    p->setVisible(false);
+    p->hide();
 #if !defined(_WIN32)
     // Xlib: unmap (not run in v1.0, U-WIN). Cocoa: miniaturize; KosmicKrisp keeps reporting the
     // layer's size as currentExtent, so this is not the 0-extent path.
@@ -95,7 +95,7 @@ TEST_CASE_FIXTURE(PresentTest, "minimise and restore") {
 
     window().restore();
     p->resize(window().clientSize());
-    p->setVisible(true);
+    p->show();
     const std::uint64_t n = p->stats().framesPresented;
     REQUIRE(pumpUntil(window(), [&] {
         p->requestFrame();
@@ -107,18 +107,54 @@ TEST_CASE_FIXTURE(PresentTest, "minimise and restore") {
 }
 
 // Design M1b §8.2 case 4: one frame already in flight may still be presented.
-TEST_CASE_FIXTURE(PresentTest, "setVisible(false) stops frames until setVisible(true)") {
+TEST_CASE_FIXTURE(PresentTest, "hide() stops frames until show()") {
     const std::unique_ptr<Presenter> p = makePresenter();
     presentFirstFrame(window(), *p);
-    p->setVisible(false);
+    p->hide();
     const std::uint64_t n = p->stats().framesPresented;
     pumpRequesting(window(), *p, 300ms);
     CHECK(p->stats().framesPresented <= n + 1);
     CHECK(p->stats().hidden);
-    p->setVisible(true);
+    p->show();
     REQUIRE(pumpUntil(window(), [&] {
         p->requestFrame();
         return p->stats().framesPresented > n + 1;
+    }));
+    CHECK_FALSE(p->failure());
+    CHECK(errors().size() == 0);
+}
+
+// Repeated calls change nothing: the state is a flag, not a counter.
+TEST_CASE_FIXTURE(PresentTest, "hide() and show() repeat without counting") {
+    const std::unique_ptr<Presenter> p = makePresenter();
+    presentFirstFrame(window(), *p);
+    p->hide();
+    p->hide();
+    REQUIRE(pumpUntil(window(), [&] { return p->stats().hidden; }));
+    p->show();
+    p->show();
+    REQUIRE(pumpUntil(window(), [&] { return !p->stats().hidden; }));
+    const std::uint64_t n = p->stats().framesPresented;
+    REQUIRE(pumpUntil(window(), [&] {
+        p->requestFrame();
+        return p->stats().framesPresented > n;
+    }));
+    CHECK_FALSE(p->failure());
+    CHECK(errors().size() == 0);
+}
+
+// setVisible stays until 1.0.0 and forwards to show() and hide().
+TEST_CASE_FIXTURE(PresentTest, "setVisible(false) and setVisible(true) still hide and show") {
+    const std::unique_ptr<Presenter> p = makePresenter();
+    presentFirstFrame(window(), *p);
+    p->setVisible(false);
+    REQUIRE(pumpUntil(window(), [&] { return p->stats().hidden; }));
+    p->setVisible(true);
+    REQUIRE(pumpUntil(window(), [&] { return !p->stats().hidden; }));
+    const std::uint64_t n = p->stats().framesPresented;
+    REQUIRE(pumpUntil(window(), [&] {
+        p->requestFrame();
+        return p->stats().framesPresented > n;
     }));
     CHECK_FALSE(p->failure());
     CHECK(errors().size() == 0);

@@ -26,6 +26,7 @@
 #include "gpu_fixture.h"
 #include "submitter.h"
 
+using dvv::gpu::BufferCopy;
 using dvv::gpu::BufferDesc;
 using dvv::gpu::CommandRecorder;
 using dvv::gpu::GpuBuffer;
@@ -492,7 +493,9 @@ TEST_CASE_FIXTURE(GpuTest, "many submissions in flight complete and free what th
                     auto record = [&readback, index,
                                    buffer = std::move(*scratch)](CommandRecorder& recorder) {
                         recorder.fillBuffer(*buffer, static_cast<std::uint32_t>(index + 1));
-                        recorder.copyBuffer(*buffer, 0, *readback, index * SLICE, SLICE);
+                        recorder.copyBuffer(
+                            *buffer, *readback,
+                            {.sourceOffset = 0, .destinationOffset = index * SLICE, .size = SLICE});
                     };
                     results[index] = dvv::gpu::test::submitAndWait(ctx, pool, std::move(record));
                 }

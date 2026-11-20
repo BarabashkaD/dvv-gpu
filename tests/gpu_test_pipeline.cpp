@@ -32,6 +32,7 @@
 using dvv::gpu::CommandRecorder;
 using dvv::gpu::ComputePipeline;
 using dvv::gpu::ContextOptions;
+using dvv::gpu::GroupCount;
 using dvv::gpu::detail::Access;
 using dvv::gpu::detail::PIPELINE_CACHE_TRAILER_SIZE;
 using dvv::gpu::test::CapturedLog;
@@ -188,14 +189,15 @@ TEST_CASE_FIXTURE(GpuTest, "a dispatch checks its pipeline, push constants and g
     const std::byte push_constants[PUSH_CONSTANT_SIZE]{};
 
     const auto short_push = submitAndWait([&](CommandRecorder& recorder) {
-        recorder.dispatch(*pipeline, std::span(push_constants).first(8), 1);
+        recorder.dispatch(*pipeline, std::span(push_constants).first(8), GroupCount{1});
     });
     REQUIRE_FALSE(short_push.has_value());
     CHECK(short_push.error().message ==
           "dispatch: pipeline 'add_one' takes 16 bytes of push constants, not 8");
 
-    const auto no_groups = submitAndWait(
-        [&](CommandRecorder& recorder) { recorder.dispatch(*pipeline, push_constants, 0); });
+    const auto no_groups = submitAndWait([&](CommandRecorder& recorder) {
+        recorder.dispatch(*pipeline, push_constants, GroupCount{0});
+    });
     REQUIRE_FALSE(no_groups.has_value());
     CHECK(no_groups.error().message.starts_with(
         "dispatch: the group counts 0x1x1 must be at least 1 and at most "));
@@ -211,7 +213,7 @@ TEST_CASE_FIXTURE(GpuTest, "a dispatch checks its pipeline, push constants and g
         std::uint32_t counts[3]{1, 1, 1};
         counts[axis] = limit[axis] + 1;
         const auto too_many_groups = submitAndWait([&](CommandRecorder& recorder) {
-            recorder.dispatch(*pipeline, push_constants, counts[0], counts[1], counts[2]);
+            recorder.dispatch(*pipeline, push_constants, {counts[0], counts[1], counts[2]});
         });
         REQUIRE_FALSE(too_many_groups.has_value());
         CHECK(too_many_groups.error().message.starts_with(
@@ -224,8 +226,9 @@ TEST_CASE_FIXTURE(GpuTest, "a dispatch checks its pipeline, push constants and g
     auto other = gpuInstance().createContext(device()).value();
     const auto foreign =
         createComputePipeline(*other, test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
-    const auto device_check = submitAndWait(
-        [&](CommandRecorder& recorder) { recorder.dispatch(*foreign, push_constants, 1); });
+    const auto device_check = submitAndWait([&](CommandRecorder& recorder) {
+        recorder.dispatch(*foreign, push_constants, GroupCount{1});
+    });
     REQUIRE_FALSE(device_check.has_value());
     CHECK(device_check.error().message == "dispatch: pipeline 'add_one' belongs to another device");
 }
