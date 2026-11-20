@@ -1,6 +1,6 @@
-// dvv-gpu-info: prints what the GpuInstance finds (spec §5.1).
+// dvv-gpu-info: prints what the GpuInstance finds.
 //   dvv-gpu-info [--json]
-// Exit codes (spec §10.3): 0 a usable device exists, 1 bad arguments, 4 GPU error, e.g. no Vulkan
+// Exit codes: 0 a usable device exists, 1 bad arguments, 4 GPU error, e.g. no Vulkan
 // loader or no usable device.
 
 #include <cstdint>

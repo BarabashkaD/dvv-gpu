@@ -142,8 +142,8 @@ private:
     // Presenter thread only (and initialise()/the destructor while no thread runs).
     PresenterLogic logic_;
     Requests snapshot_{};
-    // C, not vk::SurfaceKHR: surface creators are reached through vkGetInstanceProcAddr (no
-    // vk-bootstrap surface helpers), and they return the C handle.
+    // Surface creators are reached through vkGetInstanceProcAddr (no vk-bootstrap surface
+    // helpers) and return the C handle; it is wrapped in vk::SurfaceKHR here.
     vk::SurfaceKHR surface_{};
     VkSurfaceFormatKHR format_{};
     PresentEncoding encoding_ = PresentEncoding::Linear;  // presentEncoding(format_.format)

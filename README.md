@@ -258,7 +258,7 @@ An application that ships its own Vulkan driver calls `useBundledDrivers(manifes
 `DriverChoice::Bundled`, `UserChoice` (the user's variable is left as it is) or `NoManifest`
 (nothing set).
 
-- **Errors.** `Errc::Unsupported`, and nothing set, when a manifest's path contains the list
+- **Errors.** `Errc::Unsupported`, and nothing set, when an existing manifest's path contains the list
   separator (`;` on Windows, `:` elsewhere): the loader would split the value there. On macOS a `/`
   typed in a Finder folder name is a `:` in the path. `Errc::Internal` when the variable cannot be
   set.
