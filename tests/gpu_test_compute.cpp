@@ -24,6 +24,8 @@ using dvv::gpu::BufferDesc;
 using dvv::gpu::CommandRecorder;
 using dvv::gpu::ComputePipeline;
 using dvv::gpu::GpuBuffer;
+using dvv::gpu::MappedRead;
+using dvv::gpu::MappedWrite;
 using dvv::gpu::MemoryUsage;
 using dvv::gpu::test::GpuTest;
 
@@ -63,14 +65,15 @@ std::vector<std::uint32_t> expected(std::uint32_t added) {
 
 void write(GpuBuffer& buffer, const std::vector<std::uint32_t>& values) {
     REQUIRE(buffer.size() == values.size() * sizeof(std::uint32_t));
-    std::memcpy(buffer.mapped().data(), values.data(), buffer.size());
-    REQUIRE(buffer.flush().has_value());
+    MappedWrite scope = buffer.mapWrite();
+    std::memcpy(scope.bytes().data(), values.data(), buffer.size());
+    REQUIRE(scope.flush().has_value());
 }
 
 std::vector<std::uint32_t> read(GpuBuffer& buffer) {
-    REQUIRE(buffer.invalidate().has_value());
+    const MappedRead scope = buffer.mapRead().value();
     std::vector<std::uint32_t> values(buffer.size() / sizeof(std::uint32_t));
-    std::memcpy(values.data(), buffer.mapped().data(), buffer.size());
+    std::memcpy(values.data(), scope.bytes().data(), buffer.size());
     return values;
 }
 

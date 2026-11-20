@@ -1,6 +1,8 @@
 #pragma once
 
 // Reuse of transient GPU buffers (spec §5.3).
+// Deprecated (0.3.0): ResourcePool, ResourcePoolStats and ExecutionContext::createResourcePool are
+// removed in 1.0.0 (spec §5.6). Frame-memory reuse belongs to dvv-media's frame store.
 
 #include <cstddef>
 #include <cstdint>

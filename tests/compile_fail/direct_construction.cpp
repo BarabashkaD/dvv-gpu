@@ -8,7 +8,11 @@
 //   6  creating a ResourcePool without its context
 //   7  creating a ComputePipeline without its context
 //   8  creating a Presenter without its context
+//   9  writing a buffer through a const holder (mapWrite() is not const)
+//   10 making a MappedWrite outside its buffer
+#include <cstddef>
 #include <memory>
+#include <span>
 #include <string>
 
 #include "dvv/base/lifetime.h"
@@ -47,6 +51,12 @@ int main() {
     // Every argument but the key.
     auto presenter = std::make_unique<dvv::gpu::Presenter>(
         std::shared_ptr<dvv::gpu::ExecutionContext>{}, nullptr);
+#elif DVV_COMPILE_FAIL_CASE == 9
+    const auto write = [](const dvv::gpu::GpuBuffer& buffer) { return buffer.mapWrite(); };
+#elif DVV_COMPILE_FAIL_CASE == 10
+    const auto forge = [](dvv::gpu::GpuBuffer& buffer) {
+        dvv::gpu::MappedWrite scope(buffer, std::span<std::byte>{});
+    };
 #endif
     return gpu_instance.has_value() ? 0 : 1;
 }

@@ -3,6 +3,7 @@
 // GPU buffers and images (spec §5.3): RAII over a VMA allocation, the Vulkan handle and a debug
 // name, created by an ExecutionContext. The destructor hands the handle and its memory to the
 // context's retire queue, which frees them once the GPU has finished every submission made so far.
+// The host reaches a buffer's memory through the scopes MappedWrite and MappedRead (spec §5.6).
 
 #include <atomic>
 #include <cstddef>
@@ -53,6 +54,51 @@ struct ImageDesc {
     std::string name{};
 };
 
+class GpuBuffer;  // the friend declarations below do not make the name visible
+
+// A write view of a host-visible buffer's mapped memory, from GpuBuffer::mapWrite(). Move-only;
+// the buffer must outlive it (the caller holds the buffer). bytes() stays valid while the scope
+// lives; a scope may be stored (e.g. in a frame). Call flush() after writing and before the GPU
+// reads; the destructor does not flush. One write scope of a buffer at a time.
+class MappedWrite {
+public:
+    MappedWrite(MappedWrite&& other) noexcept;
+    MappedWrite& operator=(MappedWrite&& other) noexcept;
+    MappedWrite(const MappedWrite&) = delete;
+    MappedWrite& operator=(const MappedWrite&) = delete;
+    ~MappedWrite() = default;
+    // Empty for a DeviceOnly buffer.
+    [[nodiscard]] std::span<std::byte> bytes() const noexcept;
+    // Makes host writes in [offset, offset + size) visible to the device (offsets from the buffer's
+    // start). Does nothing on host-coherent memory or an empty scope.
+    [[nodiscard]] Result<void> flush(std::uint64_t offset = 0, std::uint64_t size = VK_WHOLE_SIZE);
+
+private:
+    friend class GpuBuffer;
+    MappedWrite(GpuBuffer& buffer, std::span<std::byte> mapped_bytes) noexcept;
+    GpuBuffer* buffer_ = nullptr;  // null when moved from
+    std::span<std::byte> bytes_{};
+};
+
+// A read view, from GpuBuffer::mapRead(), which made device writes visible first. Move-only; the
+// buffer must outlive it. bytes() stays valid while the scope lives; a scope may be stored (e.g.
+// `std::optional<MappedRead>`, or `std::unique_ptr<MappedRead>` where only a declaration is
+// visible). It sees later device writes only after a new mapRead().
+class MappedRead {
+public:
+    MappedRead(MappedRead&& other) noexcept;
+    MappedRead& operator=(MappedRead&& other) noexcept;
+    MappedRead(const MappedRead&) = delete;
+    MappedRead& operator=(const MappedRead&) = delete;
+    ~MappedRead() = default;
+    [[nodiscard]] std::span<const std::byte> bytes() const noexcept;  // empty for DeviceOnly
+
+private:
+    friend class GpuBuffer;
+    explicit MappedRead(std::span<const std::byte> mapped_bytes) noexcept;
+    std::span<const std::byte> bytes_{};
+};
+
 class GpuBuffer final : public Managed<GpuBuffer> {
 public:
     GpuBuffer(CreationKey<ExecutionContext> key, std::shared_ptr<detail::DeviceCore> core,
@@ -65,11 +111,19 @@ public:
     [[nodiscard]] std::uint64_t size() const noexcept { return desc_.size; }
     [[nodiscard]] VkBuffer handle() const noexcept { return buffer_; }
     [[nodiscard]] VkDeviceAddress deviceAddress() const noexcept { return address_; }
+    // Non-const: only a holder that may change the buffer can write it.
+    [[nodiscard]] MappedWrite mapWrite() noexcept;
+    // Invalidates the mapped range (call after the GPU work completed), then returns the view.
+    // Vulkan errors as converted; an empty scope for DeviceOnly without a call.
+    [[nodiscard]] Result<MappedRead> mapRead() const;
+    // Deprecated (0.3.0): use mapWrite() or mapRead(); removed in 1.0.0.
     // The mapped memory of a host-visible buffer (HostUpload, HostReadback); empty otherwise.
     [[nodiscard]] std::span<std::byte> mapped() const noexcept { return mapped_; }
+    // Deprecated (0.3.0): use MappedWrite::flush(); removed in 1.0.0.
     // Makes host writes visible to the device; call after writing mapped() and before the GPU
     // reads. Does nothing on host-coherent memory.
     [[nodiscard]] Result<void> flush(std::uint64_t offset = 0, std::uint64_t size = VK_WHOLE_SIZE);
+    // Deprecated (0.3.0): use mapRead(); removed in 1.0.0.
     // Makes device writes visible to the host; call after the GPU work completed and before
     // reading mapped(). Does nothing on host-coherent memory.
     [[nodiscard]] Result<void> invalidate(std::uint64_t offset = 0,

@@ -26,6 +26,8 @@ using dvv::gpu::CommandRecorder;
 using dvv::gpu::ExecutionContext;
 using dvv::gpu::GpuImage;
 using dvv::gpu::GpuInstance;
+using dvv::gpu::MappedRead;
+using dvv::gpu::MappedWrite;
 using dvv::gpu::MemoryUsage;
 using dvv::gpu::detail::Access;
 
@@ -137,8 +139,9 @@ Blitted blitAndRead(PresentBlitTest& test, std::span<const std::uint8_t> rgba, V
                                           .memory = MemoryUsage::HostUpload,
                                           .name = "upload"})
                             .value();
-    std::memcpy(upload->mapped().data(), rgba.data(), rgba.size());
-    REQUIRE(upload->flush().has_value());
+    MappedWrite upload_scope = upload->mapWrite();
+    std::memcpy(upload_scope.bytes().data(), rgba.data(), rgba.size());
+    REQUIRE(upload_scope.flush().has_value());
     auto image =
         ctx.createImage({.width = source.width,
                          .height = source.height,
@@ -199,8 +202,8 @@ Blitted blitAndRead(PresentBlitTest& test, std::span<const std::uint8_t> rgba, V
     };
     REQUIRE(test.submitAndWait(read).has_value());
 
-    REQUIRE(readback->invalidate().has_value());
-    const auto bytes = readback->mapped();
+    const MappedRead readback_scope = readback->mapRead().value();
+    const std::span<const std::byte> bytes = readback_scope.bytes();
     Blitted result{.bgra = std::vector<std::uint8_t>(target_bytes), .source = std::move(image)};
     std::memcpy(result.bgra.data(), bytes.data(), result.bgra.size());
     return result;

@@ -26,6 +26,8 @@
 using dvv::gpu::BufferDesc;
 using dvv::gpu::CommandRecorder;
 using dvv::gpu::GpuBuffer;
+using dvv::gpu::MappedRead;
+using dvv::gpu::MappedWrite;
 using dvv::gpu::MemoryUsage;
 using dvv::gpu::detail::Access;
 using dvv::gpu::test::GpuTest;
@@ -36,16 +38,17 @@ constexpr VkBufferUsageFlags TRANSFER =
     VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
 std::vector<std::uint32_t> read(GpuBuffer& buffer) {
-    REQUIRE(buffer.invalidate().has_value());
+    const MappedRead scope = buffer.mapRead().value();
     std::vector<std::uint32_t> values(buffer.size() / sizeof(std::uint32_t));
-    std::memcpy(values.data(), buffer.mapped().data(), values.size() * sizeof(std::uint32_t));
+    std::memcpy(values.data(), scope.bytes().data(), values.size() * sizeof(std::uint32_t));
     return values;
 }
 
 void write(GpuBuffer& buffer, const std::vector<std::uint32_t>& values) {
     REQUIRE(buffer.size() >= values.size() * sizeof(std::uint32_t));
-    std::memcpy(buffer.mapped().data(), values.data(), values.size() * sizeof(std::uint32_t));
-    REQUIRE(buffer.flush().has_value());
+    MappedWrite scope = buffer.mapWrite();
+    std::memcpy(scope.bytes().data(), values.data(), values.size() * sizeof(std::uint32_t));
+    REQUIRE(scope.flush().has_value());
 }
 
 // Suspends on the submission, then reports the thread the coroutine resumed on.

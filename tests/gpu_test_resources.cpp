@@ -6,22 +6,29 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
+#include <span>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "access.h"
 #include "device_core.h"
 #include "dvv/base/error.h"
 #include "dvv/base/lifetime.h"
+#include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/resources.h"
 #include "gpu_fixture.h"
 
 using dvv::gpu::BufferDesc;
+using dvv::gpu::CommandRecorder;
 using dvv::gpu::GpuBuffer;
 using dvv::gpu::GpuImage;
 using dvv::gpu::ImageDesc;
+using dvv::gpu::MappedRead;
+using dvv::gpu::MappedWrite;
 using dvv::gpu::MemoryUsage;
 using dvv::gpu::detail::Access;
 using dvv::gpu::test::GpuTest;
@@ -39,6 +46,45 @@ std::uint64_t pretendSubmission(dvv::gpu::detail::DeviceCore& core) {
 void signalTimeline(dvv::gpu::detail::DeviceCore& core, std::uint64_t value) {
     const vk::SemaphoreSignalInfo signal{.semaphore = core.timeline(), .value = value};
     REQUIRE(core.device().signalSemaphore(signal, core.dispatch()) == vk::Result::eSuccess);
+}
+
+constexpr std::uint64_t SCOPE_BYTES = 256;
+
+const BufferDesc UPLOAD{.size = SCOPE_BYTES,
+                        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                        .memory = MemoryUsage::HostUpload,
+                        .name = "scope upload"};
+const BufferDesc READBACK{.size = SCOPE_BYTES,
+                          .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                          .memory = MemoryUsage::HostReadback,
+                          .name = "scope readback"};
+
+// The bytes 0, 1, ..., SCOPE_BYTES - 1.
+std::vector<std::byte> sequence() {
+    std::vector<std::byte> values(SCOPE_BYTES);
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        values[i] = static_cast<std::byte>(i);
+    }
+    return values;
+}
+
+void writeBytes(std::span<std::byte> target, const std::vector<std::byte>& values) {
+    REQUIRE(target.size() == values.size());
+    std::ranges::copy(values, target.begin());
+}
+
+bool holds(std::span<const std::byte> bytes, const std::vector<std::byte>& values) {
+    return std::ranges::equal(bytes, values);
+}
+
+// Short calls, so that a line using a moved-from scope fits its NOLINT comment.
+template <class Scope>
+bool isEmpty(const Scope& scope) {
+    return scope.bytes().empty();
+}
+
+bool flushes(MappedWrite& scope) {
+    return scope.flush().has_value();
 }
 
 }  // namespace
@@ -59,16 +105,17 @@ TEST_CASE_FIXTURE(GpuTest, "a host-visible buffer is mapped and has a device add
     CHECK(buffer->ownerId() == context().objectId());
     CHECK(buffer->typeName() == "dvv::gpu::GpuBuffer");
 
-    const std::span<std::byte> mapped = buffer->mapped();
-    REQUIRE(mapped.size() == 4000);
+    MappedWrite write = buffer->mapWrite();
+    REQUIRE(write.bytes().size() == 4000);
     std::vector<std::uint32_t> values(1000);
     for (std::uint32_t i = 0; i < values.size(); ++i) {
         values[i] = i * 3;
     }
-    std::memcpy(mapped.data(), values.data(), mapped.size());
-    REQUIRE(buffer->flush().has_value());
-    REQUIRE(buffer->invalidate().has_value());
-    CHECK(std::memcmp(mapped.data(), values.data(), mapped.size()) == 0);
+    std::memcpy(write.bytes().data(), values.data(), write.bytes().size());
+    REQUIRE(write.flush().has_value());
+    const MappedRead read = buffer->mapRead().value();
+    REQUIRE(read.bytes().size() == 4000);
+    CHECK(std::memcmp(read.bytes().data(), values.data(), read.bytes().size()) == 0);
 }
 
 TEST_CASE_FIXTURE(GpuTest, "an upload buffer is mapped, a device-only buffer is not") {
@@ -77,14 +124,14 @@ TEST_CASE_FIXTURE(GpuTest, "an upload buffer is mapped, a device-only buffer is 
                                            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                            .memory = MemoryUsage::HostUpload})
                             .value();
-    CHECK(upload->mapped().size() == 64);
+    CHECK(upload->mapWrite().bytes().size() == 64);
 
     const auto device_only = context()
                                  .createBuffer({.size = 64,
                                                 .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                                 .memory = MemoryUsage::DeviceOnly})
                                  .value();
-    CHECK(device_only->mapped().empty());
+    CHECK(device_only->mapWrite().bytes().empty());
     CHECK(device_only->deviceAddress() != 0);
     CHECK(device_only->deviceAddress() != upload->deviceAddress());
 }
@@ -193,8 +240,9 @@ TEST_CASE_FIXTURE(GpuTest, "a resource keeps the device after its context is gon
     ctx.reset();
     // Still usable: the buffer keeps the device, and the device keeps the GPU instance.
     CHECK_FALSE(watch.expired());
-    std::ranges::fill(buffer->mapped(), std::byte{0x5a});
-    CHECK(buffer->flush().has_value());
+    MappedWrite write = buffer->mapWrite();
+    std::ranges::fill(write.bytes(), std::byte{0x5a});
+    CHECK(write.flush().has_value());
     auto kept = watch.lock();
     REQUIRE(kept);
     buffer.reset();  // frees the buffer, then the device; `kept` holds the GPU instance
@@ -315,4 +363,117 @@ TEST_CASE_FIXTURE(GpuTest, "retire queue: a failed creation gives its slots back
     }
     CHECK(core.retireSlots() == slots);
     CHECK(core.retireCapacity() == capacity);
+}
+
+// §5.6: the scoped mapping.
+TEST_CASE_FIXTURE(GpuTest, "a write scope flushes and a read scope sees device writes") {
+    const auto upload = context().createBuffer(UPLOAD).value();
+    const auto readback = context().createBuffer(READBACK).value();
+    MappedWrite write = upload->mapWrite();
+    writeBytes(write.bytes(), sequence());
+    REQUIRE(write.flush().has_value());
+    REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
+                recorder.copyBuffer(*upload, *readback);
+            }).has_value());
+    const auto read = readback->mapRead();
+    CHECK(read.has_value());
+    if (read) {
+        CHECK(holds(read->bytes(), sequence()));
+    }
+}
+
+TEST_CASE_FIXTURE(GpuTest, "a device-only buffer maps to empty scopes") {
+    const auto buffer = context()
+                            .createBuffer({.size = 64,
+                                           .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                           .memory = MemoryUsage::DeviceOnly})
+                            .value();
+    CHECK(buffer->mapWrite().bytes().empty());
+    CHECK(buffer->mapWrite().flush().has_value());
+    const auto read = buffer->mapRead();
+    CHECK(read.has_value());
+    if (read) {
+        CHECK(read->bytes().empty());
+    }
+}
+
+TEST_CASE_FIXTURE(GpuTest, "a stored read scope keeps its bytes") {
+    const auto upload = context().createBuffer(UPLOAD).value();
+    const auto readback = context().createBuffer(READBACK).value();
+    MappedWrite write = upload->mapWrite();
+    writeBytes(write.bytes(), sequence());
+    REQUIRE(write.flush().has_value());
+    REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
+                recorder.copyBuffer(*upload, *readback);
+            }).has_value());
+
+    SUBCASE("in a std::optional") {
+        std::optional<MappedRead> scope;
+        scope = readback->mapRead().value();
+        struct Frame {
+            std::optional<dvv::gpu::MappedRead> scope;
+        };
+        const Frame frame{.scope = std::move(scope)};
+        CHECK(frame.scope.has_value());
+        if (frame.scope) {
+            CHECK(holds(frame.scope->bytes(), sequence()));
+        }
+    }
+    // Spec revision 3: where only gpu_fwd.h's declaration is visible.
+    SUBCASE("in a std::unique_ptr") {
+        auto read = readback->mapRead();
+        CHECK(read.has_value());
+        if (read) {
+            const std::unique_ptr<dvv::gpu::MappedRead> scope =
+                std::make_unique<MappedRead>(std::move(*read));
+            CHECK(holds(scope->bytes(), sequence()));
+        }
+    }
+}
+
+TEST_CASE_FIXTURE(GpuTest, "the deprecated mapped() still works (0.3.x)") {
+    const auto upload = context().createBuffer(UPLOAD).value();
+    const auto readback = context().createBuffer(READBACK).value();
+    writeBytes(upload->mapped(), sequence());
+    REQUIRE(upload->flush().has_value());
+    REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
+                recorder.copyBuffer(*upload, *readback);
+            }).has_value());
+    REQUIRE(readback->invalidate().has_value());
+    CHECK(holds(readback->mapped(), sequence()));
+}
+
+TEST_CASE_FIXTURE(GpuTest, "a moved-from map scope is empty and flushes without a call") {
+    const auto buffer = context().createBuffer(UPLOAD).value();
+    const auto buffer2 = context().createBuffer(UPLOAD).value();
+    const auto readback = context().createBuffer(READBACK).value();
+
+    MappedWrite a = buffer->mapWrite();
+    MappedWrite b = std::move(a);
+    CHECK(isEmpty(a));  // NOLINT(bugprone-use-after-move): the moved-from state is under test
+    CHECK(flushes(a));  // NOLINT(bugprone-use-after-move): the moved-from state is under test
+    writeBytes(b.bytes(), sequence());
+    CHECK(b.flush().has_value());
+
+    // The move-assigned scope writes the first buffer, not the one it was made from.
+    std::vector<std::byte> reversed = sequence();
+    std::ranges::reverse(reversed);
+    MappedWrite c = buffer2->mapWrite();
+    c = std::move(b);
+    CHECK(isEmpty(b));  // NOLINT(bugprone-use-after-move): the moved-from state is under test
+    CHECK(flushes(b));  // NOLINT(bugprone-use-after-move): the moved-from state is under test
+    writeBytes(c.bytes(), reversed);
+    CHECK(c.flush().has_value());
+    REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
+                recorder.copyBuffer(*buffer, *readback);
+            }).has_value());
+
+    MappedRead first = readback->mapRead().value();
+    MappedRead second = std::move(first);
+    CHECK(isEmpty(first));  // NOLINT(bugprone-use-after-move): the moved-from state is under test
+    CHECK(holds(second.bytes(), reversed));
+    MappedRead third = buffer2->mapRead().value();
+    third = std::move(second);
+    CHECK(isEmpty(second));  // NOLINT(bugprone-use-after-move): the moved-from state is under test
+    CHECK(holds(third.bytes(), reversed));
 }

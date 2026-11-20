@@ -123,6 +123,7 @@ public:
     // creates the image's view (GpuImage::view(): 2D, the whole image, the image's format),
     // retired with the image.
     [[nodiscard]] Result<std::shared_ptr<GpuImage>> createImage(ImageDesc desc);
+    // Deprecated (0.3.0): see resource_pool.h; removed in 1.0.0.
     // A pool that reuses the buffers it hands out (spec §5.3); it keeps this context alive.
     [[nodiscard]] Result<std::shared_ptr<ResourcePool>> createResourcePool();
     // A compute pipeline (spec §5.4) from an embedded shader (entry point main) with a

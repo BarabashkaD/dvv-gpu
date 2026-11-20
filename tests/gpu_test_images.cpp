@@ -29,6 +29,7 @@ using dvv::gpu::ComputeBindings;
 using dvv::gpu::GpuBuffer;
 using dvv::gpu::GpuImage;
 using dvv::gpu::ImageDesc;
+using dvv::gpu::MappedRead;
 using dvv::gpu::MemoryUsage;
 using dvv::gpu::detail::Access;
 using dvv::gpu::test::GpuTest;
@@ -68,9 +69,9 @@ BufferDesc readback(std::uint64_t size, std::string name) {
 
 template <class T>
 std::vector<T> read(GpuBuffer& buffer) {
-    REQUIRE(buffer.invalidate().has_value());
+    const MappedRead scope = buffer.mapRead().value();
     std::vector<T> values(buffer.size() / sizeof(T));
-    std::memcpy(values.data(), buffer.mapped().data(), values.size() * sizeof(T));
+    std::memcpy(values.data(), scope.bytes().data(), values.size() * sizeof(T));
     return values;
 }
 
