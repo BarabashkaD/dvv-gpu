@@ -26,13 +26,13 @@ bool isSet(const std::function<std::optional<std::string>(std::string_view)>& ge
 
 }  // namespace
 
-Result<DriverSetting> bundledDriverSetting(
+Result<DriverDecision> bundledDriverDecision(
     std::span<const std::filesystem::path> manifests,
     const std::function<std::optional<std::string>(std::string_view)>& get_env) {
     if (isSet(get_env, "VK_DRIVER_FILES") || isSet(get_env, "VK_ICD_FILENAMES")) {
-        return DriverSetting{.choice = DriverChoice::UserChoice};
+        return DriverDecision{.choice = DriverChoice::UserChoice};
     }
-    DriverSetting setting;
+    DriverDecision decision;
     for (const std::filesystem::path& manifest : manifests) {
         std::error_code error;
         if (!std::filesystem::is_regular_file(manifest, error)) {
@@ -46,29 +46,29 @@ Result<DriverSetting> bundledDriverSetting(
                                          "'{}', so VK_DRIVER_FILES cannot name it",
                                          pathDisplayText(manifest), LIST_SEPARATOR));
         }
-        if (setting.choice == DriverChoice::Bundled) {
-            setting.value += LIST_SEPARATOR;
+        if (decision.choice == DriverChoice::Bundled) {
+            decision.value += LIST_SEPARATOR;
         }
-        setting.value += text;
-        setting.choice = DriverChoice::Bundled;
+        decision.value += text;
+        decision.choice = DriverChoice::Bundled;
     }
-    return setting;
+    return decision;
 }
 
 }  // namespace detail
 
 Result<DriverChoice> useBundledDrivers(std::span<const std::filesystem::path> manifests) {
-    DVV_TRY(const detail::DriverSetting setting,
-            detail::bundledDriverSetting(manifests, getEnvironment));
-    if (setting.choice == DriverChoice::Bundled) {
+    DVV_TRY(const detail::DriverDecision decision,
+            detail::bundledDriverDecision(manifests, getEnvironment));
+    if (decision.choice == DriverChoice::Bundled) {
         // setEnvironment would remove the variable for an empty value; a Bundled value names at
         // least one manifest, whose path text is not empty.
-        assert(!setting.value.empty());
-        if (!setEnvironment("VK_DRIVER_FILES", setting.value)) {
+        assert(!decision.value.empty());
+        if (!setEnvironment("VK_DRIVER_FILES", decision.value)) {
             return makeError(Errc::Internal, "cannot set VK_DRIVER_FILES");
         }
     }
-    return setting.choice;
+    return decision.choice;
 }
 
 }  // namespace dvv::gpu

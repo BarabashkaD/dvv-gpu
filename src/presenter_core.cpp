@@ -162,23 +162,22 @@ Result<void> PresenterCore::initialise() {
         return vkError(surface.error(),
                        std::format("creating the window surface of presenter '{}'", name_));
     }
-    surface_ = *surface;
+    surface_ = vk::SurfaceKHR(*surface);
     const auto& api = device_->dispatch();
     const vk::PhysicalDevice physical = device_->physicalDevice();
-    const vk::SurfaceKHR surface_handle(surface_);
 
     // The out-parameter form: the value form copies an unset Bool32 when the call fails.
     vk::Bool32 supported = vk::False;
-    DVV_TRY_VOID(vkCheck(
-        physical.getSurfaceSupportKHR(device_->queueFamily(), surface_handle, &supported, api),
-        "vkGetPhysicalDeviceSurfaceSupportKHR"));
+    DVV_TRY_VOID(
+        vkCheck(physical.getSurfaceSupportKHR(device_->queueFamily(), surface_, &supported, api),
+                "vkGetPhysicalDeviceSurfaceSupportKHR"));
     if (supported == vk::False) {
         return makeError(Errc::Unsupported,
                          std::format("presenter '{}': the queue of device {} cannot present to "
                                      "the window",
                                      name_, device_->id()));
     }
-    const auto caps = physical.getSurfaceCapabilitiesKHR(surface_handle, api);
+    const auto caps = physical.getSurfaceCapabilitiesKHR(surface_, api);
     DVV_TRY_VOID(vkCheck(caps.result, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"));
     if (!(caps.value.supportedUsageFlags & vk::ImageUsageFlagBits::eTransferDst)) {
         return makeError(Errc::Unsupported,
@@ -192,10 +191,10 @@ Result<void> PresenterCore::initialise() {
     vk::Result listed = vk::Result::eIncomplete;
     while (listed == vk::Result::eIncomplete) {
         std::uint32_t count = 0;
-        DVV_TRY_VOID(vkCheck(physical.getSurfaceFormatsKHR(surface_handle, &count, nullptr, api),
+        DVV_TRY_VOID(vkCheck(physical.getSurfaceFormatsKHR(surface_, &count, nullptr, api),
                              "vkGetPhysicalDeviceSurfaceFormatsKHR"));
         listed_formats.resize(count);
-        listed = physical.getSurfaceFormatsKHR(surface_handle, &count, listed_formats.data(), api);
+        listed = physical.getSurfaceFormatsKHR(surface_, &count, listed_formats.data(), api);
         listed_formats.resize(count);
     }
     DVV_TRY_VOID(vkCheck(listed, "vkGetPhysicalDeviceSurfaceFormatsKHR"));
@@ -600,8 +599,7 @@ void PresenterCore::present() {
 void PresenterCore::recreateSwapchain() {
     const auto& api = device_->dispatch();
     const vk::Device device = device_->device();
-    const auto caps =
-        device_->physicalDevice().getSurfaceCapabilitiesKHR(vk::SurfaceKHR(surface_), api);
+    const auto caps = device_->physicalDevice().getSurfaceCapabilitiesKHR(surface_, api);
     if (caps.result != vk::Result::eSuccess) {
         failSwapchain(caps.result, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
         return;
@@ -612,7 +610,7 @@ void PresenterCore::recreateSwapchain() {
         return;
     }
     const vk::SwapchainCreateInfoKHR info{
-        .surface = vk::SurfaceKHR(surface_),
+        .surface = surface_,
         .minImageCount = swapchainImageCount(caps.value),
         .imageFormat = static_cast<vk::Format>(format_.format),
         .imageColorSpace = static_cast<vk::ColorSpaceKHR>(format_.colorSpace),
@@ -715,9 +713,9 @@ void PresenterCore::releaseVulkanObjects() noexcept {
         device.destroyFence(fence_, nullptr, api);
     }
     fence_ = nullptr;
-    if (surface_ != VK_NULL_HANDLE) {
-        vk::Instance(instance_).destroySurfaceKHR(vk::SurfaceKHR(surface_), nullptr, api);
-        surface_ = VK_NULL_HANDLE;
+    if (surface_) {
+        vk::Instance(instance_).destroySurfaceKHR(surface_, nullptr, api);
+        surface_ = nullptr;
     }
 }
 

@@ -144,7 +144,7 @@ private:
     Requests snapshot_{};
     // C, not vk::SurfaceKHR: surface creators are reached through vkGetInstanceProcAddr (no
     // vk-bootstrap surface helpers), and they return the C handle.
-    VkSurfaceKHR surface_ = VK_NULL_HANDLE;
+    vk::SurfaceKHR surface_{};
     VkSurfaceFormatKHR format_{};
     PresentEncoding encoding_ = PresentEncoding::Linear;  // presentEncoding(format_.format)
     vk::Fence fence_;

@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -381,14 +382,23 @@ TEST_CASE_FIXTURE(GpuTest, "concurrent saves to one pipeline cache file leave a 
     }
 }
 
-#if !defined(_WIN32)  // creating a symbolic link needs a privilege on Windows
 TEST_CASE_FIXTURE(GpuTest, "a pipeline cache path that is a symbolic link is not replaced") {
     const TemporaryDirectory folder;
     const std::filesystem::path real = folder.path() / "real.bin";
     const std::filesystem::path link = folder.path() / "cache.bin";
     const std::vector<std::byte> one_byte(1, std::byte{'x'});
     writeFile(real, one_byte);
-    std::filesystem::create_symlink(real, link);
+    std::error_code link_error;
+    std::filesystem::create_symlink(real, link, link_error);
+#if defined(_WIN32)
+    // Creating a symbolic link needs developer mode or the symbolic-link privilege on Windows.
+    if (link_error) {
+        MESSAGE("skipped: no symbolic link can be created here (" << link_error.message() << ")");
+        return;
+    }
+#else
+    REQUIRE_FALSE(link_error);
+#endif
     {
         auto ctx = gpuInstance()
                        .createContext(device(), ContextOptions{.pipelineCacheFile = link})
@@ -408,7 +418,6 @@ TEST_CASE_FIXTURE(GpuTest, "a pipeline cache path that is a symbolic link is not
     CHECK(readFile(real) == one_byte);
     CHECK(temporaryFiles(folder.path()) == 0);
 }
-#endif
 
 TEST_CASE_FIXTURE(GpuTest, "without a file the pipeline cache stays in memory") {
     CHECK(Access::pipelineCache(context()).file().empty());
