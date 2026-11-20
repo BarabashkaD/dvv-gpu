@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "dvv/base/task.h"
+#include "dvv/gpu/context_vulkan.h"
 
 namespace dvv::gpu::test {
 
@@ -19,7 +20,7 @@ namespace {
 
 Task<Result<std::uint64_t>> submitTask(ExecutionContext& context, IExecutor& executor,
                                        RecordFunction record) {
-    co_return co_await context.submit(executor, std::move(record));
+    co_return co_await submit(context, executor, std::move(record));
 }
 
 }  // namespace

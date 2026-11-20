@@ -59,7 +59,7 @@ void write(GpuBuffer& buffer, const std::vector<std::uint32_t>& values) {
 dvv::Task<std::thread::id> resumedThread(dvv::gpu::ExecutionContext& context,
                                          dvv::IExecutor& executor,
                                          dvv::Result<std::uint64_t>& result) {
-    result = co_await context.submit(executor, [](CommandRecorder&) {});
+    result = co_await submit(context, executor, [](CommandRecorder&) {});
     co_return std::this_thread::get_id();
 }
 
@@ -73,17 +73,15 @@ bool isLive(dvv::ObjectId id) {
 }  // namespace
 
 TEST_CASE_FIXTURE(GpuTest, "a buffer is filled and copied on the GPU") {
-    auto device_only = context()
-                           .createBuffer({.size = 4096,
-                                          .usage = TRANSFER,
-                                          .memory = MemoryUsage::DeviceOnly,
-                                          .name = "filled"})
-                           .value();
-    auto readback = context()
-                        .createBuffer({.size = 4096,
-                                       .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                       .memory = MemoryUsage::HostReadback,
-                                       .name = "readback"})
+    auto device_only =
+        createBuffer(
+            context(),
+            {.size = 4096, .usage = TRANSFER, .memory = MemoryUsage::DeviceOnly, .name = "filled"})
+            .value();
+    auto readback = createBuffer(context(), {.size = 4096,
+                                             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                             .memory = MemoryUsage::HostReadback,
+                                             .name = "readback"})
                         .value();
     const auto value = submitAndWait([&](CommandRecorder& recorder) {
         recorder.fillBuffer(*device_only, 0xa5a5a5a5U);
@@ -107,25 +105,22 @@ TEST_CASE_FIXTURE(GpuTest, "a buffer goes through an R32_UINT image and back") {
     constexpr std::uint32_t WIDTH = 33;
     constexpr std::uint32_t HEIGHT = 17;
     constexpr std::uint64_t BYTES = std::uint64_t{WIDTH} * HEIGHT * sizeof(std::uint32_t);
-    auto upload = context()
-                      .createBuffer({.size = BYTES,
-                                     .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                     .memory = MemoryUsage::HostUpload,
-                                     .name = "texels"})
+    auto upload = createBuffer(context(), {.size = BYTES,
+                                           .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                           .memory = MemoryUsage::HostUpload,
+                                           .name = "texels"})
                       .value();
-    auto readback = context()
-                        .createBuffer({.size = BYTES,
-                                       .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                       .memory = MemoryUsage::HostReadback,
-                                       .name = "texels back"})
+    auto readback = createBuffer(context(), {.size = BYTES,
+                                             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                             .memory = MemoryUsage::HostReadback,
+                                             .name = "texels back"})
                         .value();
-    auto image = context()
-                     .createImage({.width = WIDTH,
-                                   .height = HEIGHT,
-                                   .format = VK_FORMAT_R32_UINT,
-                                   .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                   .name = "texel image"})
+    auto image = createImage(context(), {.width = WIDTH,
+                                         .height = HEIGHT,
+                                         .format = VK_FORMAT_R32_UINT,
+                                         .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                         .name = "texel image"})
                      .value();
     std::vector<std::uint32_t> texels(std::size_t{WIDTH} * HEIGHT);
     for (std::uint32_t i = 0; i < texels.size(); ++i) {
@@ -138,7 +133,7 @@ TEST_CASE_FIXTURE(GpuTest, "a buffer goes through an R32_UINT image and back") {
                 recorder.copyImageToBuffer(*image, *readback);  // and on to TRANSFER_SRC_OPTIMAL
             }).has_value());
     CHECK(read(*readback) == texels);
-    CHECK(image->layout() == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    CHECK(vulkanLayout(*image) == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
     // In GENERAL, both copies use the image as it is.
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
@@ -146,7 +141,7 @@ TEST_CASE_FIXTURE(GpuTest, "a buffer goes through an R32_UINT image and back") {
                 recorder.fillBuffer(*readback, 0);
                 recorder.copyImageToBuffer(*image, *readback);
             }).has_value());
-    CHECK(image->layout() == VK_IMAGE_LAYOUT_GENERAL);
+    CHECK(vulkanLayout(*image) == VK_IMAGE_LAYOUT_GENERAL);
     CHECK(read(*readback) == texels);
 }
 
@@ -171,7 +166,7 @@ TEST_CASE_FIXTURE(GpuTest, "the awaiting coroutine resumes on the given executor
 
 TEST_CASE_FIXTURE(GpuTest, "resources captured by the record function are freed after the GPU") {
     auto buffer =
-        context().createBuffer({.size = 256, .usage = TRANSFER, .name = "captured"}).value();
+        createBuffer(context(), {.size = 256, .usage = TRANSFER, .name = "captured"}).value();
     const std::weak_ptr<GpuBuffer> watch = buffer;
     const auto before = context().retireStats();
     REQUIRE(submitAndWait([buffer = std::move(buffer)](CommandRecorder& recorder) {
@@ -187,10 +182,9 @@ TEST_CASE_FIXTURE(GpuTest, "resources captured by the record function are freed 
 
 TEST_CASE_FIXTURE(GpuTest, "a resource dropped while its submission is recorded waits for it") {
     auto& core = Access::core(context());
-    auto buffer = context()
-                      .createBuffer({.size = 256,
-                                     .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                     .name = "dropped while recording"})
+    auto buffer = createBuffer(context(), {.size = 256,
+                                           .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                           .name = "dropped while recording"})
                       .value();
     GpuBuffer* const borrowed = buffer.get();
     std::latch recording(1);
@@ -259,11 +253,10 @@ TEST_CASE_FIXTURE(GpuTest,
 
 TEST_CASE_FIXTURE(GpuTest, "a record function that throws fails only its own submission") {
     auto& core = Access::core(context());
-    auto readback = context()
-                        .createBuffer({.size = 64,
-                                       .usage = TRANSFER,
-                                       .memory = MemoryUsage::HostReadback,
-                                       .name = "untouched"})
+    auto readback = createBuffer(context(), {.size = 64,
+                                             .usage = TRANSFER,
+                                             .memory = MemoryUsage::HostReadback,
+                                             .name = "untouched"})
                         .value();
     write(*readback, std::vector<std::uint32_t>(16, 5));
     const std::uint64_t reserved_before = core.lastReservedValue();
@@ -287,17 +280,15 @@ TEST_CASE_FIXTURE(GpuTest, "a record function that throws fails only its own sub
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a command that cannot be recorded fails the submission") {
-    auto small = context()
-                     .createBuffer({.size = 64,
-                                    .usage = TRANSFER,
-                                    .memory = MemoryUsage::HostReadback,
-                                    .name = "small"})
-                     .value();
-    auto no_transfer =
-        context()
-            .createBuffer(
-                {.size = 64, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, .name = "storage only"})
+    auto small =
+        createBuffer(
+            context(),
+            {.size = 64, .usage = TRANSFER, .memory = MemoryUsage::HostReadback, .name = "small"})
             .value();
+    auto no_transfer = createBuffer(context(), {.size = 64,
+                                                .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                .name = "storage only"})
+                           .value();
     write(*small, std::vector<std::uint32_t>(16, 1));
 
     bool failed = false;
@@ -331,7 +322,7 @@ TEST_CASE_FIXTURE(GpuTest, "a command that cannot be recorded fails the submissi
 
     // A buffer of another context (another device as far as the recorder is concerned).
     auto other = gpuInstance().createContext(device()).value();
-    auto foreign = other->createBuffer({.size = 64, .usage = TRANSFER, .name = "foreign"}).value();
+    auto foreign = createBuffer(*other, {.size = 64, .usage = TRANSFER, .name = "foreign"}).value();
     const auto device_check =
         submitAndWait([&](CommandRecorder& recorder) { recorder.copyBuffer(*foreign, *small); });
     REQUIRE_FALSE(device_check.has_value());
@@ -348,11 +339,10 @@ TEST_CASE_FIXTURE(GpuTest, "an empty record function only waits for the earlier 
 }
 
 TEST_CASE_FIXTURE(GpuTest, "raw commands get the command buffer after the automatic barrier") {
-    auto buffer = context()
-                      .createBuffer({.size = 64,
-                                     .usage = TRANSFER,
-                                     .memory = MemoryUsage::HostReadback,
-                                     .name = "raw fill"})
+    auto buffer = createBuffer(context(), {.size = 64,
+                                           .usage = TRANSFER,
+                                           .memory = MemoryUsage::HostReadback,
+                                           .name = "raw fill"})
                       .value();
     bool recorded = false;
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
@@ -375,10 +365,10 @@ TEST_CASE_FIXTURE(GpuTest, "raw commands get the command buffer after the automa
 TEST_CASE_FIXTURE(GpuTest, "a context released during a submission closes on the executor") {
     auto ctx = gpuInstance().createContext(device()).value();
     const std::weak_ptr<dvv::gpu::ExecutionContext> watch = ctx;
-    auto buffer = ctx->createBuffer({.size = 64,
-                                     .usage = TRANSFER,
-                                     .memory = MemoryUsage::HostReadback,
-                                     .name = "last work"})
+    auto buffer = createBuffer(*ctx, {.size = 64,
+                                      .usage = TRANSFER,
+                                      .memory = MemoryUsage::HostReadback,
+                                      .name = "last work"})
                       .value();
     dvv::IExecutor& pool = executor();
     std::latch recording(1);
@@ -402,18 +392,16 @@ TEST_CASE_FIXTURE(GpuTest, "a context released during a submission closes on the
 }
 
 TEST_CASE_FIXTURE(GpuTest, "image commands the recorder cannot handle fail the submission") {
-    auto texels = context()
-                      .createBuffer({.size = 64,
-                                     .usage = TRANSFER,
-                                     .memory = MemoryUsage::HostUpload,
-                                     .name = "texels"})
-                      .value();
-    auto depth = context()
-                     .createImage({.width = 4,
-                                   .height = 4,
-                                   .format = VK_FORMAT_D32_SFLOAT,
-                                   .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                   .name = "depth"})
+    auto texels =
+        createBuffer(
+            context(),
+            {.size = 64, .usage = TRANSFER, .memory = MemoryUsage::HostUpload, .name = "texels"})
+            .value();
+    auto depth = createImage(context(), {.width = 4,
+                                         .height = 4,
+                                         .format = VK_FORMAT_D32_SFLOAT,
+                                         .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                         .name = "depth"})
                      .value();
     const auto depth_copy = submitAndWait(
         [&](CommandRecorder& recorder) { recorder.copyBufferToImage(*texels, *depth); });
@@ -422,12 +410,11 @@ TEST_CASE_FIXTURE(GpuTest, "image commands the recorder cannot handle fail the s
           "copyBufferToImage: image 'depth' (4x4 D32Sfloat) has a format the recorder does not "
           "handle");
 
-    auto color = context()
-                     .createImage({.width = 4,
-                                   .height = 4,
-                                   .format = VK_FORMAT_R32_UINT,
-                                   .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                   .name = "color"})
+    auto color = createImage(context(), {.width = 4,
+                                         .height = 4,
+                                         .format = VK_FORMAT_R32_UINT,
+                                         .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                         .name = "color"})
                      .value();
     const auto attachment = submitAndWait([&](CommandRecorder& recorder) {
         recorder.transition(*color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -442,7 +429,7 @@ TEST_CASE_FIXTURE(GpuTest, "image commands the recorder cannot handle fail the s
     REQUIRE_FALSE(missing_usage.has_value());
     CHECK(missing_usage.error().message ==
           "transition: image 'color' (4x4 R32Uint) lacks the usage { TransferSrc }");
-    CHECK(color->layout() == VK_IMAGE_LAYOUT_UNDEFINED);  // nothing ran
+    CHECK(vulkanLayout(*color) == VK_IMAGE_LAYOUT_UNDEFINED);  // nothing ran
 }
 
 TEST_CASE_FIXTURE(GpuTest,
@@ -477,10 +464,10 @@ TEST_CASE_FIXTURE(GpuTest, "many submissions in flight complete and free what th
     constexpr std::uint64_t SCRATCH = 1U << 20U;  // a fill that keeps the GPU busy for a while
     dvv::gpu::ExecutionContext& ctx = context();
     dvv::IExecutor& pool = executor();  // both created before the threads start
-    const auto readback = ctx.createBuffer({.size = SUBMISSIONS * SLICE,
-                                            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                            .memory = MemoryUsage::HostReadback,
-                                            .name = "slices"})
+    const auto readback = createBuffer(ctx, {.size = SUBMISSIONS * SLICE,
+                                             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                             .memory = MemoryUsage::HostReadback,
+                                             .name = "slices"})
                               .value();
     const auto before = ctx.retireStats();
 
@@ -494,10 +481,10 @@ TEST_CASE_FIXTURE(GpuTest, "many submissions in flight complete and free what th
                 start.arrive_and_wait();
                 for (std::size_t i = 0; i < PER_THREAD; ++i) {
                     const std::size_t index = (thread * PER_THREAD) + i;
-                    auto scratch = ctx.createBuffer({.size = SCRATCH,
-                                                     .usage = TRANSFER,
-                                                     .memory = MemoryUsage::DeviceOnly,
-                                                     .name = "scratch"});
+                    auto scratch = createBuffer(ctx, {.size = SCRATCH,
+                                                      .usage = TRANSFER,
+                                                      .memory = MemoryUsage::DeviceOnly,
+                                                      .name = "scratch"});
                     if (!scratch) {
                         results[index] = std::unexpected(std::move(scratch).error());
                         continue;

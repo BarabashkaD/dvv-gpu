@@ -16,6 +16,7 @@
 #include "dvv/base/error.h"
 #include "dvv/base/executors.h"
 #include "dvv/gpu/command_recorder.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/resources.h"
@@ -134,27 +135,27 @@ Blitted blitAndRead(PresentBlitTest& test, std::span<const std::uint8_t> rgba, V
                     VkExtent2D target) {
     ExecutionContext& ctx = test.context();
     REQUIRE(rgba.size() == std::size_t{source.width} * source.height * RGBA);
-    const auto upload = ctx.createBuffer({.size = rgba.size(),
-                                          .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                          .memory = MemoryUsage::HostUpload,
-                                          .name = "upload"})
+    const auto upload = createBuffer(ctx, {.size = rgba.size(),
+                                           .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                           .memory = MemoryUsage::HostUpload,
+                                           .name = "upload"})
                             .value();
     MappedWrite upload_scope = upload->mapWrite();
     std::memcpy(upload_scope.bytes().data(), rgba.data(), rgba.size());
     REQUIRE(upload_scope.flush().has_value());
-    auto image =
-        ctx.createImage({.width = source.width,
-                         .height = source.height,
-                         .format = VK_FORMAT_R8G8B8A8_UNORM,
-                         .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                         .name = "client frame"})
-            .value();
+    auto image = createImage(ctx, {.width = source.width,
+                                   .height = source.height,
+                                   .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                   .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                   .name = "client frame"})
+                     .value();
     const RawImage swapchain_image(test.core(), target);
     const std::uint64_t target_bytes = std::uint64_t{target.width} * target.height * RGBA;
-    const auto readback = ctx.createBuffer({.size = target_bytes,
-                                            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                            .memory = MemoryUsage::HostReadback,
-                                            .name = "readback"})
+    const auto readback = createBuffer(ctx, {.size = target_bytes,
+                                             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                             .memory = MemoryUsage::HostReadback,
+                                             .name = "readback"})
                               .value();
 
     const auto blit = [&](CommandRecorder& recorder) {
@@ -271,19 +272,18 @@ TEST_CASE_FIXTURE(PresentBlitTest, "presentBlit scales with linear filtering") {
 TEST_CASE_FIXTURE(PresentBlitTest, "presentBlit leaves the source in TRANSFER_SRC_OPTIMAL") {
     constexpr VkExtent2D EXTENT{.width = 33, .height = 17};
     const Blitted blitted = blitAndRead(*this, gradient(EXTENT), EXTENT, EXTENT);
-    CHECK(blitted.source->layout() == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    CHECK(vulkanLayout(*blitted.source) == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 }
 
 TEST_CASE_FIXTURE(PresentBlitTest, "presentBlit refuses an image without TRANSFER_SRC") {
     constexpr VkExtent2D EXTENT{.width = 8, .height = 8};
-    const auto image =
-        context()
-            .createImage({.width = EXTENT.width,
-                          .height = EXTENT.height,
-                          .format = VK_FORMAT_R8G8B8A8_UNORM,
-                          .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                          .name = "no source"})
-            .value();
+    const auto image = createImage(context(), {.width = EXTENT.width,
+                                               .height = EXTENT.height,
+                                               .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                               .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                                        VK_IMAGE_USAGE_SAMPLED_BIT,
+                                               .name = "no source"})
+                           .value();
     const RawImage swapchain_image(core(), EXTENT);
     const auto result = submitAndWait([&](CommandRecorder& recorder) {
         Access::presentBlit(recorder, *image, swapchain_image.handle(), EXTENT);
@@ -297,13 +297,12 @@ TEST_CASE_FIXTURE(PresentBlitTest, "presentBlit refuses an image without TRANSFE
 TEST_CASE_FIXTURE(PresentBlitTest, "presentBlit refuses an image of another device") {
     constexpr VkExtent2D EXTENT{.width = 8, .height = 8};
     const auto other = presentationContext();
-    const auto image = other
-                           ->createImage({.width = EXTENT.width,
-                                          .height = EXTENT.height,
-                                          .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                          .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                          .name = "other device"})
+    const auto image = createImage(*other, {.width = EXTENT.width,
+                                            .height = EXTENT.height,
+                                            .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                            .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                            .name = "other device"})
                            .value();
     const RawImage swapchain_image(core(), EXTENT);
     const auto result = submitAndWait([&](CommandRecorder& recorder) {
@@ -319,12 +318,11 @@ TEST_CASE_FIXTURE(PresentBlitTest,
                   "extent") {
     constexpr VkExtent2D EXTENT{.width = 8, .height = 8};
     const auto make_source = [&](VkFormat format) {
-        return context()
-            .createImage({.width = EXTENT.width,
-                          .height = EXTENT.height,
-                          .format = format,
-                          .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                          .name = "refused source"})
+        return createImage(context(), {.width = EXTENT.width,
+                                       .height = EXTENT.height,
+                                       .format = format,
+                                       .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                       .name = "refused source"})
             .value();
     };
     const auto refused = [&](GpuImage& source, VkImage target, VkExtent2D extent,

@@ -11,6 +11,7 @@
 #include "access.h"
 #include "device_core.h"
 #include "dvv/base/error.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/presenter.h"
@@ -200,10 +201,10 @@ TEST_CASE_FIXTURE(PresentTest, "a device loss seen only by the presenter marks t
         }));
         CHECK(p->failure().value_or(dvv::Error{}).code == Errc::DeviceLost);
         CHECK(ctx->lost());
-        const auto buffer = ctx->createBuffer({.size = 256,
-                                               .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                               .memory = MemoryUsage::DeviceOnly,
-                                               .name = "after a presenter loss"});
+        const auto buffer = createBuffer(*ctx, {.size = 256,
+                                                .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                .memory = MemoryUsage::DeviceOnly,
+                                                .name = "after a presenter loss"});
         REQUIRE_FALSE(buffer.has_value());
         CHECK(buffer.error().code == Errc::DeviceLost);
         p.reset();

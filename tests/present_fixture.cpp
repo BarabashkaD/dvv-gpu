@@ -11,6 +11,7 @@
 #include <vulkan/vulkan_core.h>
 
 #include "dvv/gpu/command_recorder.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/device_id.h"
 #include "dvv/gpu/resources.h"
 
@@ -52,23 +53,23 @@ FrameProvider testFrameProvider(std::shared_ptr<ExecutionContext> context,
             const std::uint64_t size =
                 static_cast<std::uint64_t>(info.extent.width) * info.extent.height * 4;
             DVV_TRY(auto new_buffer,
-                    context->createBuffer({.size = size,
-                                           .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                                    VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                           .memory = MemoryUsage::DeviceOnly,
-                                           .name = "present test pixels"}));
+                    createBuffer(*context, {.size = size,
+                                            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                            .memory = MemoryUsage::DeviceOnly,
+                                            .name = "present test pixels"}));
             const VkImageUsageFlags usage =
                 control->withoutTransferSrc.load()
                     ? VkImageUsageFlags{VK_IMAGE_USAGE_TRANSFER_DST_BIT}
                     : VkImageUsageFlags{VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT};
-            DVV_TRY(auto new_image, context->createImage({.width = info.extent.width,
-                                                          .height = info.extent.height,
-                                                          .format = control->integerFormat.load()
-                                                                        ? VK_FORMAT_R8G8B8A8_UINT
-                                                                        : VK_FORMAT_R8G8B8A8_UNORM,
-                                                          .usage = usage,
-                                                          .name = "present test image"}));
+            DVV_TRY(auto new_image, createImage(*context, {.width = info.extent.width,
+                                                           .height = info.extent.height,
+                                                           .format = control->integerFormat.load()
+                                                                         ? VK_FORMAT_R8G8B8A8_UINT
+                                                                         : VK_FORMAT_R8G8B8A8_UNORM,
+                                                           .usage = usage,
+                                                           .name = "present test image"}));
             buffer = std::move(new_buffer);
             image = std::move(new_image);
             extent = info.extent;

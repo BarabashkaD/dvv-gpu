@@ -91,11 +91,10 @@ bool flushes(MappedWrite& scope) {
 }  // namespace
 
 TEST_CASE_FIXTURE(GpuTest, "a host-visible buffer is mapped and has a device address") {
-    const auto buffer = context()
-                            .createBuffer({.size = 1000 * sizeof(std::uint32_t),
-                                           .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                           .memory = MemoryUsage::HostReadback,
-                                           .name = "test values"})
+    const auto buffer = createBuffer(context(), {.size = 1000 * sizeof(std::uint32_t),
+                                                 .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                 .memory = MemoryUsage::HostReadback,
+                                                 .name = "test values"})
                             .value();
     CHECK(buffer->size() == 4000);
     CHECK(buffer->desc().name == "test values");
@@ -120,17 +119,15 @@ TEST_CASE_FIXTURE(GpuTest, "a host-visible buffer is mapped and has a device add
 }
 
 TEST_CASE_FIXTURE(GpuTest, "an upload buffer is mapped, a device-only buffer is not") {
-    const auto upload = context()
-                            .createBuffer({.size = 64,
-                                           .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                           .memory = MemoryUsage::HostUpload})
+    const auto upload = createBuffer(context(), {.size = 64,
+                                                 .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                 .memory = MemoryUsage::HostUpload})
                             .value();
     CHECK(upload->mapWrite().bytes().size() == 64);
 
-    const auto device_only = context()
-                                 .createBuffer({.size = 64,
-                                                .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                                .memory = MemoryUsage::DeviceOnly})
+    const auto device_only = createBuffer(context(), {.size = 64,
+                                                      .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                      .memory = MemoryUsage::DeviceOnly})
                                  .value();
     CHECK(device_only->mapWrite().bytes().empty());
     CHECK(device_only->deviceAddress() != 0);
@@ -138,7 +135,7 @@ TEST_CASE_FIXTURE(GpuTest, "an upload buffer is mapped, a device-only buffer is 
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a buffer without a size is a programming error") {
-    const auto buffer = context().createBuffer({.size = 0, .name = "empty"});
+    const auto buffer = createBuffer(context(), {.size = 0, .name = "empty"});
     REQUIRE_FALSE(buffer.has_value());
     CHECK(buffer.error().code == dvv::Errc::Internal);
     CHECK(buffer.error().message == "buffer 'empty': the size is zero");
@@ -169,34 +166,33 @@ TEST_CASE_FIXTURE(GpuTest, "an image is created undefined and tracks its layout"
 }
 
 TEST_CASE_FIXTURE(GpuTest, "images the device cannot create are reported") {
-    const auto unset = context().createImage({.width = 4, .height = 4, .name = "unset"});
+    const auto unset = createImage(context(), {.width = 4, .height = 4, .name = "unset"});
     REQUIRE_FALSE(unset.has_value());
     CHECK(unset.error().code == dvv::Errc::Internal);
 
     // Block-compressed formats are never storage images.
-    const auto compressed = context().createImage({.width = 4,
-                                                   .height = 4,
-                                                   .format = VK_FORMAT_BC1_RGB_UNORM_BLOCK,
-                                                   .usage = VK_IMAGE_USAGE_STORAGE_BIT});
+    const auto compressed = createImage(context(), {.width = 4,
+                                                    .height = 4,
+                                                    .format = VK_FORMAT_BC1_RGB_UNORM_BLOCK,
+                                                    .usage = VK_IMAGE_USAGE_STORAGE_BIT});
     REQUIRE_FALSE(compressed.has_value());
     CHECK(compressed.error().code == dvv::Errc::Unsupported);
 
-    const auto huge = context().createImage({.width = 1U << 20U,
-                                             .height = 1,
-                                             .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT});
+    const auto huge = createImage(context(), {.width = 1U << 20U,
+                                              .height = 1,
+                                              .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                              .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT});
     REQUIRE_FALSE(huge.has_value());
     CHECK(huge.error().code == dvv::Errc::Unsupported);
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a resource the GPU never used is freed when it is destroyed") {
     auto buffer =
-        context().createBuffer({.size = 256, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT}).value();
-    auto image = context()
-                     .createImage({.width = 8,
-                                   .height = 8,
-                                   .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                   .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT})
+        createBuffer(context(), {.size = 256, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT}).value();
+    auto image = createImage(context(), {.width = 8,
+                                         .height = 8,
+                                         .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                         .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT})
                      .value();
     const auto live_before = dvv::LifetimeRegistry::instance().liveCount();
     buffer.reset();
@@ -211,12 +207,11 @@ TEST_CASE_FIXTURE(GpuTest, "a resource the GPU never used is freed when it is de
 TEST_CASE_FIXTURE(GpuTest, "a retired resource waits for the submission that may use it") {
     auto& core = Access::core(context());
     auto buffer =
-        context().createBuffer({.size = 256, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT}).value();
-    auto image = context()
-                     .createImage({.width = 8,
-                                   .height = 8,
-                                   .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                   .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT})
+        createBuffer(context(), {.size = 256, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT}).value();
+    auto image = createImage(context(), {.width = 8,
+                                         .height = 8,
+                                         .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                         .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT})
                      .value();
     const std::uint64_t value = pretendSubmission(core);
 
@@ -234,9 +229,9 @@ TEST_CASE_FIXTURE(GpuTest, "a resource keeps the device after its context is gon
     auto own = dvv::gpu::GpuInstance::create().value();
     const std::weak_ptr<dvv::gpu::GpuInstance> watch = own;
     std::shared_ptr<dvv::gpu::ExecutionContext> ctx = own->createContext(device()).value();
-    auto buffer = ctx->createBuffer({.size = 1024,
-                                     .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                     .memory = MemoryUsage::HostUpload})
+    auto buffer = createBuffer(*ctx, {.size = 1024,
+                                      .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                      .memory = MemoryUsage::HostUpload})
                       .value();
     own.reset();
     ctx.reset();
@@ -270,8 +265,8 @@ TEST_CASE_FIXTURE(GpuTest, "buffers are created and retired from several threads
         for (int thread = 0; thread < THREADS; ++thread) {
             threads.emplace_back([&] {
                 for (int i = 0; i < BUFFERS_PER_THREAD; ++i) {
-                    const auto buffer = ctx.createBuffer(
-                        {.size = 256, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT});
+                    const auto buffer = createBuffer(
+                        ctx, {.size = 256, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT});
                     if (!buffer) {
                         failures.fetch_add(1);
                     }
@@ -305,19 +300,17 @@ TEST_CASE_FIXTURE(GpuTest, "retire queue: creation reserves the slots its destru
     buffers.reserve(BUFFERS);
     images.reserve(IMAGES);
     for (int index = 0; index < BUFFERS; ++index) {
-        buffers.push_back(context()
-                              .createBuffer({.size = 256,
-                                             .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                             .memory = MemoryUsage::HostUpload})
+        buffers.push_back(createBuffer(context(), {.size = 256,
+                                                   .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                   .memory = MemoryUsage::HostUpload})
                               .value());
     }
     for (int index = 0; index < IMAGES; ++index) {
         // A storage image has a view, so it retires two handles.
-        images.push_back(context()
-                             .createImage({.width = 8,
-                                           .height = 8,
-                                           .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                           .usage = VK_IMAGE_USAGE_STORAGE_BIT})
+        images.push_back(createImage(context(), {.width = 8,
+                                                 .height = 8,
+                                                 .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                                 .usage = VK_IMAGE_USAGE_STORAGE_BIT})
                              .value());
     }
     const auto capacity = core.retireCapacity();
@@ -352,7 +345,7 @@ TEST_CASE_FIXTURE(GpuTest, "retire queue: a failed creation gives its slots back
     const std::size_t slots = core.retireSlots();
     std::size_t capacity = 0;
     for (int attempt = 0; attempt < ATTEMPTS; ++attempt) {
-        const auto image = context().createImage(too_large);
+        const auto image = createImage(context(), too_large);
         REQUIRE_FALSE(image.has_value());
         if (!image) {
             CHECK(image.error().code == dvv::Errc::Unsupported);
@@ -369,8 +362,8 @@ TEST_CASE_FIXTURE(GpuTest, "retire queue: a failed creation gives its slots back
 
 // §5.6: the scoped mapping.
 TEST_CASE_FIXTURE(GpuTest, "a write scope flushes and a read scope sees device writes") {
-    const auto upload = context().createBuffer(UPLOAD).value();
-    const auto readback = context().createBuffer(READBACK).value();
+    const auto upload = createBuffer(context(), UPLOAD).value();
+    const auto readback = createBuffer(context(), READBACK).value();
     MappedWrite write = upload->mapWrite();
     writeBytes(write.bytes(), sequence());
     REQUIRE(write.flush().has_value());
@@ -385,10 +378,9 @@ TEST_CASE_FIXTURE(GpuTest, "a write scope flushes and a read scope sees device w
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a device-only buffer maps to empty scopes") {
-    const auto buffer = context()
-                            .createBuffer({.size = 64,
-                                           .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                           .memory = MemoryUsage::DeviceOnly})
+    const auto buffer = createBuffer(context(), {.size = 64,
+                                                 .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                 .memory = MemoryUsage::DeviceOnly})
                             .value();
     CHECK(buffer->mapWrite().bytes().empty());
     CHECK(buffer->mapWrite().flush().has_value());
@@ -400,8 +392,8 @@ TEST_CASE_FIXTURE(GpuTest, "a device-only buffer maps to empty scopes") {
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a stored read scope keeps its bytes") {
-    const auto upload = context().createBuffer(UPLOAD).value();
-    const auto readback = context().createBuffer(READBACK).value();
+    const auto upload = createBuffer(context(), UPLOAD).value();
+    const auto readback = createBuffer(context(), READBACK).value();
     MappedWrite write = upload->mapWrite();
     writeBytes(write.bytes(), sequence());
     REQUIRE(write.flush().has_value());
@@ -434,8 +426,8 @@ TEST_CASE_FIXTURE(GpuTest, "a stored read scope keeps its bytes") {
 }
 
 TEST_CASE_FIXTURE(GpuTest, "the deprecated mapped() still works (0.3.x)") {
-    const auto upload = context().createBuffer(UPLOAD).value();
-    const auto readback = context().createBuffer(READBACK).value();
+    const auto upload = createBuffer(context(), UPLOAD).value();
+    const auto readback = createBuffer(context(), READBACK).value();
     writeBytes(upload->mapped(), sequence());
     REQUIRE(upload->flush().has_value());
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
@@ -446,9 +438,9 @@ TEST_CASE_FIXTURE(GpuTest, "the deprecated mapped() still works (0.3.x)") {
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a moved-from map scope is empty and flushes without a call") {
-    const auto buffer = context().createBuffer(UPLOAD).value();
-    const auto buffer2 = context().createBuffer(UPLOAD).value();
-    const auto readback = context().createBuffer(READBACK).value();
+    const auto buffer = createBuffer(context(), UPLOAD).value();
+    const auto buffer2 = createBuffer(context(), UPLOAD).value();
+    const auto readback = createBuffer(context(), READBACK).value();
 
     MappedWrite a = buffer->mapWrite();
     MappedWrite b = std::move(a);

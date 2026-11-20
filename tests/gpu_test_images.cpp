@@ -95,17 +95,15 @@ std::size_t mismatches(const std::vector<T>& values, std::uint32_t width, std::u
 TEST_CASE_FIXTURE(GpuTest, "a compute shader writes a storage image through a push descriptor") {
     constexpr std::uint32_t WIDTH = 37;
     constexpr std::uint32_t HEIGHT = 23;
-    const auto pipeline = context()
-                              .createComputePipeline(test_shaders::writeImage(), sizeof(Push),
-                                                     ComputeBindings{.storageImages = 1})
+    const auto pipeline = createComputePipeline(context(), test_shaders::writeImage(), sizeof(Push),
+                                                ComputeBindings{.storageImages = 1})
                               .value();
     CHECK(pipeline->bindings() == ComputeBindings{.storageImages = 1});
     CHECK(pipeline->setLayout() != VK_NULL_HANDLE);
     const auto image =
-        context().createImage(storageImage(WIDTH, HEIGHT, VK_FORMAT_R16_UINT, "written")).value();
+        createImage(context(), storageImage(WIDTH, HEIGHT, VK_FORMAT_R16_UINT, "written")).value();
     const auto buffer =
-        context()
-            .createBuffer(readback(std::uint64_t{WIDTH} * HEIGHT * 2, "written texels"))
+        createBuffer(context(), readback(std::uint64_t{WIDTH} * HEIGHT * 2, "written texels"))
             .value();
     const Push push{.w = WIDTH, .h = HEIGHT};
 
@@ -122,29 +120,28 @@ TEST_CASE_FIXTURE(GpuTest, "a compute shader writes a storage image through a pu
                      [](std::uint32_t x, std::uint32_t y) {
                          return static_cast<std::uint16_t>(x + (y * WIDTH));
                      }) == 0);
-    CHECK(image->layout() == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    CHECK(vulkanLayout(*image) == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
                 recorder.dispatch(*pipeline, std::as_bytes(std::span(&push, 1)), {&raw, 1},
                                   groups(WIDTH), groups(HEIGHT));
             }).has_value());
-    CHECK(image->layout() == VK_IMAGE_LAYOUT_GENERAL);
+    CHECK(vulkanLayout(*image) == VK_IMAGE_LAYOUT_GENERAL);
 }
 
 TEST_CASE_FIXTURE(GpuTest, "two storage images in one dispatch") {
     constexpr std::uint32_t SIZE = 16;
-    const auto pipeline =
-        context()
-            .createComputePipeline(test_shaders::writeTwoImages(), sizeof(Push), ComputeBindings{2})
-            .value();
+    const auto pipeline = createComputePipeline(context(), test_shaders::writeTwoImages(),
+                                                sizeof(Push), ComputeBindings{2})
+                              .value();
     const auto first =
-        context().createImage(storageImage(SIZE, SIZE, VK_FORMAT_R8_UINT, "first")).value();
+        createImage(context(), storageImage(SIZE, SIZE, VK_FORMAT_R8_UINT, "first")).value();
     const auto second =
-        context().createImage(storageImage(SIZE, SIZE, VK_FORMAT_R16_UINT, "second")).value();
+        createImage(context(), storageImage(SIZE, SIZE, VK_FORMAT_R16_UINT, "second")).value();
     const auto first_texels =
-        context().createBuffer(readback(std::uint64_t{SIZE} * SIZE, "first texels")).value();
+        createBuffer(context(), readback(std::uint64_t{SIZE} * SIZE, "first texels")).value();
     const auto second_texels =
-        context().createBuffer(readback(std::uint64_t{SIZE} * SIZE * 2, "second texels")).value();
+        createBuffer(context(), readback(std::uint64_t{SIZE} * SIZE * 2, "second texels")).value();
     const Push push{.w = SIZE, .h = SIZE};
 
     const std::array<GpuImage*, 2> images{first.get(), second.get()};
@@ -165,11 +162,10 @@ TEST_CASE_FIXTURE(GpuTest, "two storage images in one dispatch") {
 }
 
 TEST_CASE_FIXTURE(GpuTest, "an image appears once per dispatch") {
-    const auto pipeline =
-        context()
-            .createComputePipeline(test_shaders::writeTwoImages(), sizeof(Push), ComputeBindings{2})
-            .value();
-    const auto a = context().createImage(storageImage(8, 8, VK_FORMAT_R16_UINT, "a")).value();
+    const auto pipeline = createComputePipeline(context(), test_shaders::writeTwoImages(),
+                                                sizeof(Push), ComputeBindings{2})
+                              .value();
+    const auto a = createImage(context(), storageImage(8, 8, VK_FORMAT_R16_UINT, "a")).value();
     const Push push{.w = 8, .h = 8};
 
     const std::array<GpuImage*, 2> both{a.get(), a.get()};
@@ -182,15 +178,16 @@ TEST_CASE_FIXTURE(GpuTest, "an image appears once per dispatch") {
 }
 
 TEST_CASE_FIXTURE(GpuTest, "dispatch binds exactly the pipeline's storage images") {
-    const auto write_image = context()
-                                 .createComputePipeline(test_shaders::writeImage(), sizeof(Push),
-                                                        ComputeBindings{.storageImages = 1})
-                                 .value();
+    const auto write_image =
+        createComputePipeline(context(), test_shaders::writeImage(), sizeof(Push),
+                              ComputeBindings{.storageImages = 1})
+            .value();
     const auto add_one =
-        context().createComputePipeline(test_shaders::addOne(), ADD_ONE_PUSH_SIZE).value();
+        createComputePipeline(context(), test_shaders::addOne(), ADD_ONE_PUSH_SIZE).value();
     CHECK(add_one->bindings() == ComputeBindings{});
     CHECK(add_one->setLayout() == VK_NULL_HANDLE);
-    const auto image = context().createImage(storageImage(8, 8, VK_FORMAT_R16_UINT, "one")).value();
+    const auto image =
+        createImage(context(), storageImage(8, 8, VK_FORMAT_R16_UINT, "one")).value();
     const Push push{.w = 8, .h = 8};
     const std::array<std::byte, ADD_ONE_PUSH_SIZE> add_one_push{};
 
@@ -211,16 +208,14 @@ TEST_CASE_FIXTURE(GpuTest, "dispatch binds exactly the pipeline's storage images
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a storage image needs STORAGE usage") {
-    const auto pipeline = context()
-                              .createComputePipeline(test_shaders::writeImage(), sizeof(Push),
-                                                     ComputeBindings{.storageImages = 1})
+    const auto pipeline = createComputePipeline(context(), test_shaders::writeImage(), sizeof(Push),
+                                                ComputeBindings{.storageImages = 1})
                               .value();
-    const auto image = context()
-                           .createImage({.width = 8,
-                                         .height = 8,
-                                         .format = VK_FORMAT_R16_UINT,
-                                         .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                                         .name = "no storage"})
+    const auto image = createImage(context(), {.width = 8,
+                                               .height = 8,
+                                               .format = VK_FORMAT_R16_UINT,
+                                               .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                               .name = "no storage"})
                            .value();
     const Push push{.w = 8, .h = 8};
 
@@ -260,22 +255,22 @@ TEST_CASE_FIXTURE(GpuTest, "pipeline bindings must fit the device and the shader
     const std::uint32_t max = Access::core(context()).maxPushDescriptors();
     CHECK(max >= 32);
 
-    const auto too_many = context().createComputePipeline(test_shaders::writeImage(), sizeof(Push),
-                                                          ComputeBindings{max + 1});
+    const auto too_many = createComputePipeline(context(), test_shaders::writeImage(), sizeof(Push),
+                                                ComputeBindings{max + 1});
     REQUIRE_FALSE(too_many.has_value());
     CHECK(too_many.error().code == dvv::Errc::Internal);
     CHECK(too_many.error().message.find("maxPushDescriptors") != std::string::npos);
 
     for (const std::uint32_t count : {0U, 2U}) {
         INFO("storage images: " << count);
-        const auto wrong = context().createComputePipeline(test_shaders::writeImage(), sizeof(Push),
-                                                           ComputeBindings{count});
+        const auto wrong = createComputePipeline(context(), test_shaders::writeImage(),
+                                                 sizeof(Push), ComputeBindings{count});
         REQUIRE_FALSE(wrong.has_value());
         CHECK(wrong.error().code == dvv::Errc::Internal);
         CHECK(wrong.error().message.find("declares descriptor bindings") != std::string::npos);
     }
-    const auto add_one = context().createComputePipeline(test_shaders::addOne(), ADD_ONE_PUSH_SIZE,
-                                                         ComputeBindings{1});
+    const auto add_one = createComputePipeline(context(), test_shaders::addOne(), ADD_ONE_PUSH_SIZE,
+                                               ComputeBindings{1});
     REQUIRE_FALSE(add_one.has_value());
     CHECK(add_one.error().code == dvv::Errc::Internal);
     CHECK(add_one.error().message.find("declares descriptor bindings") != std::string::npos);
@@ -285,12 +280,12 @@ TEST_CASE_FIXTURE(GpuTest, "views and set layouts are retired and freed") {
     const std::uint64_t freed_before = context().retireStats().freed;
     {
         const auto image =
-            context().createImage(storageImage(8, 8, VK_FORMAT_R16_UINT, "retired")).value();
-        const auto pipeline = context()
-                                  .createComputePipeline(test_shaders::writeImage(), sizeof(Push),
-                                                         ComputeBindings{.storageImages = 1})
-                                  .value();
-        CHECK(image->view() != VK_NULL_HANDLE);
+            createImage(context(), storageImage(8, 8, VK_FORMAT_R16_UINT, "retired")).value();
+        const auto pipeline =
+            createComputePipeline(context(), test_shaders::writeImage(), sizeof(Push),
+                                  ComputeBindings{.storageImages = 1})
+                .value();
+        CHECK(vulkanView(*image) != VK_NULL_HANDLE);
         CHECK(pipeline->setLayout() != VK_NULL_HANDLE);
     }
     REQUIRE(context().drain().has_value());
@@ -304,7 +299,7 @@ TEST_CASE_FIXTURE(GpuTest,
                   "formatFeatures reports storage writes without format for R8_UINT and R16_UINT") {
     for (const VkFormat format : {VK_FORMAT_R8_UINT, VK_FORMAT_R16_UINT}) {
         INFO("format: " << static_cast<int>(format));
-        const VkFormatFeatureFlags2 features = context().formatFeatures(format);
+        const VkFormatFeatureFlags2 features = formatFeatures(context(), format);
         CHECK((features & VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT) != 0);
         CHECK((features & VK_FORMAT_FEATURE_2_STORAGE_WRITE_WITHOUT_FORMAT_BIT) != 0);
     }
@@ -314,7 +309,7 @@ TEST_CASE_FIXTURE(GpuTest, "a storage image of a format without storage support 
     VkFormat chosen = VK_FORMAT_UNDEFINED;
     for (const VkFormat format :
          {VK_FORMAT_R8G8B8_UNORM, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D16_UNORM}) {
-        if ((context().formatFeatures(format) & VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT) == 0) {
+        if ((formatFeatures(context(), format) & VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT) == 0) {
             chosen = format;
             break;
         }
@@ -323,11 +318,11 @@ TEST_CASE_FIXTURE(GpuTest, "a storage image of a format without storage support 
         MESSAGE("every candidate format supports storage images: nothing to refuse");
         return;
     }
-    const auto image = context().createImage({.width = 8,
-                                              .height = 8,
-                                              .format = chosen,
-                                              .usage = VK_IMAGE_USAGE_STORAGE_BIT,
-                                              .name = "no storage format"});
+    const auto image = createImage(context(), {.width = 8,
+                                               .height = 8,
+                                               .format = chosen,
+                                               .usage = VK_IMAGE_USAGE_STORAGE_BIT,
+                                               .name = "no storage format"});
     REQUIRE_FALSE(image.has_value());
     CHECK(image.error().code == dvv::Errc::Unsupported);
     CHECK(image.error().message.find("no storage images") != std::string::npos);
@@ -363,12 +358,12 @@ TEST_CASE_FIXTURE(GpuTest, "an image larger than the format's maxExtent is Unsup
         CAPTURE(width);
         CAPTURE(height);
         const auto image =
-            context().createImage(storageImage(width, height, VK_FORMAT_R16_UINT, "too large"));
+            createImage(context(), storageImage(width, height, VK_FORMAT_R16_UINT, "too large"));
         REQUIRE_FALSE(image.has_value());
         CHECK(image.error().code == dvv::Errc::Unsupported);
         CAPTURE(image.error().message);
         CHECK(image.error().message.find("exceeds the largest") != std::string::npos);
     }
     // The context stays usable after the refusals.
-    CHECK(context().createImage(storageImage(8, 8, VK_FORMAT_R16_UINT, "after")).has_value());
+    CHECK(createImage(context(), storageImage(8, 8, VK_FORMAT_R16_UINT, "after")).has_value());
 }

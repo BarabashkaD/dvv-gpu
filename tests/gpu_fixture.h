@@ -49,7 +49,7 @@ private:
     std::shared_ptr<MemorySink> sink_ = std::make_shared<MemorySink>();
 };
 
-// co_await context.submit(executor, record) from a coroutine; blocks until it has resumed.
+// co_await submit(context, executor, record) from a coroutine; blocks until it has resumed.
 [[nodiscard]] Result<std::uint64_t> submitAndWait(ExecutionContext& context, IExecutor& executor,
                                                   RecordFunction record);
 

@@ -14,6 +14,7 @@
 #include "dvv/base/error.h"
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/compute_pipeline.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/resource_pool.h"
 #include "dvv/gpu/resources.h"
@@ -98,8 +99,8 @@ void addOne(CommandRecorder& recorder, const ComputePipeline& pipeline, const Gp
 
 TEST_CASE_FIXTURE(GpuTest, "add_one adds 1 to every value of a buffer") {
     const auto pipeline =
-        context().createComputePipeline(test_shaders::addOne(), sizeof(AddOne)).value();
-    const auto buffer = context().createBuffer(VALUES).value();
+        createComputePipeline(context(), test_shaders::addOne(), sizeof(AddOne)).value();
+    const auto buffer = createBuffer(context(), VALUES).value();
     write(*buffer, expected(0));
 
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
@@ -113,8 +114,8 @@ TEST_CASE_FIXTURE(GpuTest, "a dispatch sees the writes of the dispatch before it
     // recorder nor synchronization validation can follow: only the recorder's automatic barrier
     // between the two dispatches orders them.
     const auto pipeline =
-        context().createComputePipeline(test_shaders::addOne(), sizeof(AddOne)).value();
-    const auto buffer = context().createBuffer(VALUES).value();
+        createComputePipeline(context(), test_shaders::addOne(), sizeof(AddOne)).value();
+    const auto buffer = createBuffer(context(), VALUES).value();
     write(*buffer, expected(0));
 
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
@@ -134,7 +135,7 @@ TEST_CASE_FIXTURE(GpuTest, "a dispatch sees the writes of the dispatch before it
 
 TEST_CASE_FIXTURE(GpuTest, "a pooled buffer is reused once the GPU has finished with it") {
     const auto pipeline =
-        context().createComputePipeline(test_shaders::addOne(), sizeof(AddOne)).value();
+        createComputePipeline(context(), test_shaders::addOne(), sizeof(AddOne)).value();
     const auto pool = context().createResourcePool().value();
     auto lease = pool->acquireBuffer(VALUES).value();
     const VkBuffer handle = lease->handle();
