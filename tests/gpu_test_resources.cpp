@@ -419,7 +419,7 @@ TEST_CASE_FIXTURE(GpuTest, "a stored read scope keeps its bytes") {
             CHECK(holds(frame.scope->bytes(), sequence()));
         }
     }
-    // Spec revision 3: where only gpu_fwd.h's declaration is visible.
+    // A scope stored behind a std::unique_ptr.
     SUBCASE("in a std::unique_ptr") {
         auto read = readback->mapRead();
         CHECK(read.has_value());
@@ -451,7 +451,7 @@ TEST_CASE_FIXTURE(GpuTest, "a moved-from map scope is empty and flushes without 
     MappedWrite a = buffer->mapWrite();
     MappedWrite b = std::move(a);
     CHECK(isEmpty(a));  // NOLINT(bugprone-use-after-move): the moved-from state is under test
-    CHECK(flushes(a));  // NOLINT(bugprone-use-after-move): the moved-from state is under test
+    CHECK(flushes(a));  // a non-const reference: tidy counts it as a reinitialisation
     writeBytes(b.bytes(), sequence());
     CHECK(b.flush().has_value());
 
@@ -461,7 +461,7 @@ TEST_CASE_FIXTURE(GpuTest, "a moved-from map scope is empty and flushes without 
     MappedWrite c = buffer2->mapWrite();
     c = std::move(b);
     CHECK(isEmpty(b));  // NOLINT(bugprone-use-after-move): the moved-from state is under test
-    CHECK(flushes(b));  // NOLINT(bugprone-use-after-move): the moved-from state is under test
+    CHECK(flushes(b));  // a non-const reference: tidy counts it as a reinitialisation
     writeBytes(c.bytes(), reversed);
     CHECK(c.flush().has_value());
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
