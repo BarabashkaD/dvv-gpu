@@ -28,9 +28,9 @@ class Submitter;
 struct Access;
 }  // namespace detail
 
-// Settings for GpuInstance::createContext().
+// Options for GpuInstance::createContext().
 struct ContextOptions {
-    // The on-disk pipeline cache (spec §5.2), e.g. defaultPipelineCacheFile(); empty: in memory
+    // The on-disk pipeline cache, e.g. defaultPipelineCacheFile(); empty: in memory
     // only. A file written for another device or driver build, or one whose header or data is
     // damaged (dvv checks a checksum), is ignored with a log line. The cache is saved there by
     // savePipelineCache() and when the context closes (only when it changed). Each save replaces
@@ -47,14 +47,14 @@ struct ContextOptions {
 [[nodiscard]] Result<std::filesystem::path> defaultPipelineCacheFile(std::string_view app,
                                                                      const GpuInfo& device);
 
-// Counters of the retire queue (spec §5.3, §9.4).
+// Counters of the retire queue.
 struct RetireStats {
     std::size_t retiring = 0;   // handles waiting until the GPU no longer uses them
     std::uint64_t retired = 0;  // handles ever queued
     std::uint64_t freed = 0;    // handles ever destroyed
 };
 
-// One Vulkan device and everything that works on it (spec §5.2): the device with the required
+// One Vulkan device and everything that works on it: the device with the required
 // features, one universal queue (graphics, compute and transfer; access serialised by a mutex),
 // the VMA allocator, the timeline semaphore, the retire queue, and the submit and waiter threads.
 // Components reach the GPU only through a context. Created by GpuInstance::createContext(); keeps
@@ -89,7 +89,7 @@ public:
         return gpuInstance();
     }
     [[nodiscard]] DeviceId deviceId() const noexcept;
-    // Device generation (spec §5.2); FIRST_GENERATION until device-lost recovery exists.
+    // Device generation; FIRST_GENERATION until device-lost recovery exists.
     [[nodiscard]] DeviceGeneration generation() const noexcept;
     [[nodiscard]] const GpuInfo& deviceInfo() const noexcept;
     // Whether VK_KHR_swapchain is enabled (ContextOptions::presentation).
@@ -107,7 +107,7 @@ public:
     [[nodiscard]] bool lost() const noexcept;
     // Deprecated (0.3.0): use createPresenter(context, options, frames) (presenter_vulkan.h);
     // removed in 1.0.0. The provider is options.frames.
-    // A presenter for one native window (spec §4, §10.2; see presenter.h). Errc::Internal on a
+    // A presenter for one native window (see presenter.h). Errc::Internal on a
     // context without ContextOptions::presentation, for an empty frame provider and for a window of
     // another window system (or none); Errc::Unsupported when the device's queue cannot present to
     // the window or no swapchain format and usage fit (TRANSFER_DST usage, a UNORM or SRGB format
@@ -117,11 +117,11 @@ public:
     [[nodiscard]] Result<std::unique_ptr<Presenter>> createPresenter(PresenterOptions options);
 
     // Deprecated (0.3.0): use createBuffer(context, desc) (context_vulkan.h); removed in 1.0.0.
-    // A buffer (spec §5.3). Errc::Internal for a zero size; Vulkan errors as converted by dvv-gpu
+    // A buffer. Errc::Internal for a zero size; Vulkan errors as converted by dvv-gpu
     // (e.g. OutOfMemory). Frees retired memory the GPU has finished with first.
     [[nodiscard]] Result<std::shared_ptr<GpuBuffer>> createBuffer(BufferDesc desc);
     // Deprecated (0.3.0): use createImage(context, desc) (context_vulkan.h); removed in 1.0.0.
-    // A 2D image (spec §5.3). Errc::Internal when width, height, format or usage is missing;
+    // A 2D image. Errc::Internal when width, height, format or usage is missing;
     // Errc::Unsupported when the device cannot create it (format, usage or size). STORAGE usage
     // needs a format with VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT (else Errc::Unsupported "image
     // '<name>': device <id> has no storage images of <format>"). STORAGE or SAMPLED usage also
@@ -130,11 +130,11 @@ public:
     [[nodiscard]] Result<std::shared_ptr<GpuImage>> createImage(ImageDesc desc);
     // Deprecated (0.3.0): use GpuBuffer::mapWrite() and mapRead() (see resource_pool.h); removed
     // in 1.0.0.
-    // A pool that reuses the buffers it hands out (spec §5.3); it keeps this context alive.
+    // A pool that reuses the buffers it hands out; it keeps this context alive.
     [[nodiscard]] Result<std::shared_ptr<ResourcePool>> createResourcePool();
     // Deprecated (0.3.0): use createComputePipeline(context, shader, push_constant_size)
     // (context_vulkan.h); removed in 1.0.0.
-    // A compute pipeline (spec §5.4) from an embedded shader (entry point main) with a
+    // A compute pipeline from an embedded shader (entry point main) with a
     // push-constant range of `push_constant_size` bytes (0: none), made through the context's
     // pipeline cache. The range must cover the shader's push-constant block, which is checked when
     // the shader has its reflection JSON. Errc::Internal when the shader is not SPIR-V, the size is
@@ -161,7 +161,7 @@ public:
 
     // Deprecated (0.3.0): use submit(context, resume_on, record) (context_vulkan.h); removed in
     // 1.0.0.
-    // One submission (spec §4): co_await submit(*ctx, executor, record). The submit thread calls
+    // One submission: co_await submit(*ctx, executor, record). The submit thread calls
     // record with a CommandRecorder, then submits the commands with a signal of the next timeline
     // value; the awaiting coroutine resumes on `resume_on` once the GPU has finished them, with
     // that value or the error that stopped the submission. A record function that throws fails the

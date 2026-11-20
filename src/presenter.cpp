@@ -99,8 +99,8 @@ Result<std::unique_ptr<Presenter>> ExecutionContext::makePresenter(PresenterOpti
         const std::string_view need =
             wanted ? platform::windowSystemName(*wanted) : "no window system";
         return makeError(Errc::Internal,
-                         std::format("presenter '{}': the window is {}, the registry presents "
-                                     "to {}",
+                         std::format("presenter '{}': the window is {}, the GPU instance "
+                                     "presents to {}",
                                      options.name, have, need));
     }
     auto core = std::make_unique<detail::PresenterCore>(

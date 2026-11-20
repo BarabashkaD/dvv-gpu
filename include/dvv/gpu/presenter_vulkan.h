@@ -1,6 +1,6 @@
 #pragma once
 
-// include/dvv/gpu/presenter_vulkan.h — includes presenter.h. 0.3.x: PresentFrame and
+// The Vulkan side of a presenter; includes presenter.h. 0.3.x: PresentFrame and
 // FrameProvider are still declared in presenter.h; 1.0.0 declares them here.
 
 #include <memory>

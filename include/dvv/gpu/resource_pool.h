@@ -1,6 +1,6 @@
 #pragma once
 
-// Reuse of transient GPU buffers (spec §5.3).
+// Reuse of transient GPU buffers.
 // Deprecated (0.3.0): ResourcePool, ResourcePoolStats and ExecutionContext::createResourcePool;
 // use GpuBuffer::mapWrite() and mapRead(); removed in 1.0.0. Frame-memory reuse belongs to the
 // frame store.
@@ -28,7 +28,7 @@ struct ResourcePoolStats {
     std::uint64_t reused = 0;   // acquisitions served from the pool
 };
 
-// Hands out buffers and takes them back (spec §5.3). A buffer acquired from the pool returns to it
+// Hands out buffers and takes them back. A buffer acquired from the pool returns to it
 // when its last shared_ptr is released, and is handed out again, for the same size, usage and
 // memory, once the GPU has finished every submission made or being recorded at its return. Each
 // buffer is created (and registered in the lifetime registry) once. Created by

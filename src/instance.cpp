@@ -160,11 +160,11 @@ Result<ValidationChoice> resolveValidation(const GpuInstanceOptions& options,
                                            const std::optional<std::string>& environment_mode,
                                            const std::optional<std::string>& environment_required,
                                            BuildType build) {
-    ValidationChoice request{.mode = build == BuildType::Debug ? ValidationMode::On
-                                                               : ValidationMode::Off};
+    ValidationChoice choice{.mode = build == BuildType::Debug ? ValidationMode::On
+                                                              : ValidationMode::Off};
     if (options.validation) {
-        request.mode = *options.validation;
-        request.explicitlyRequested = true;
+        choice.mode = *options.validation;
+        choice.explicitlyRequested = true;
     } else if (environment_mode && !environment_mode->empty()) {
         const auto mode = parseValidationMode(*environment_mode);
         if (!mode) {
@@ -172,20 +172,20 @@ Result<ValidationChoice> resolveValidation(const GpuInstanceOptions& options,
                              std::format("DVV_VK_VALIDATION must be off, on or sync, got '{}'",
                                          *environment_mode));
         }
-        request.mode = *mode;
-        request.explicitlyRequested = true;
+        choice.mode = *mode;
+        choice.explicitlyRequested = true;
     }
     if (options.validationRequired) {
-        request.required = *options.validationRequired;
+        choice.required = *options.validationRequired;
     } else if (environment_required && !environment_required->empty()) {
         if (*environment_required != "0" && *environment_required != "1") {
             return makeError(Errc::Format,
                              std::format("DVV_VK_VALIDATION_REQUIRED must be 0 or 1, got '{}'",
                                          *environment_required));
         }
-        request.required = *environment_required == "1";
+        choice.required = *environment_required == "1";
     }
-    return request;
+    return choice;
 }
 
 Result<ValidationMode> effectiveValidation(const ValidationChoice& choice, LayerPresence layer) {
@@ -256,7 +256,7 @@ std::string formatDebugMessage(Severity severity, vk::DebugUtilsMessageTypeFlags
 }
 
 Result<std::unique_ptr<InstanceCore>> InstanceCore::create(const GpuInstanceOptions& options) {
-    DVV_TRY(const ValidationChoice request,
+    DVV_TRY(const ValidationChoice choice,
             resolveValidation(options, getEnvironment("DVV_VK_VALIDATION"),
                               getEnvironment("DVV_VK_VALIDATION_REQUIRED"), BUILD_TYPE));
     DVV_TRY(const PFN_vkGetInstanceProcAddr get_instance_proc_addr, vulkanLoader());
@@ -293,12 +293,12 @@ Result<std::unique_ptr<InstanceCore>> InstanceCore::create(const GpuInstanceOpti
     }
     DVV_TRY(core->validation_,
             effectiveValidation(
-                request, layer_installed ? LayerPresence::Installed : LayerPresence::Missing));
-    if (core->validation_ != request.mode) {
-        DVV_LOG(request.explicitlyRequested ? LogLevel::Warn : LogLevel::Info,
+                choice, layer_installed ? LayerPresence::Installed : LayerPresence::Missing));
+    if (core->validation_ != choice.mode) {
+        DVV_LOG(choice.explicitlyRequested ? LogLevel::Warn : LogLevel::Info,
                 "Vulkan validation '{}' was requested, but {} 1.4 or newer is not installed; "
                 "validation is off",
-                validationModeName(request.mode), VALIDATION_LAYER);
+                validationModeName(choice.mode), VALIDATION_LAYER);
     }
 
     const auto extensions = vk::enumerateInstanceExtensionProperties(nullptr, dispatch);
@@ -324,7 +324,7 @@ Result<std::unique_ptr<InstanceCore>> InstanceCore::create(const GpuInstanceOpti
                                    ? FailedStep::CreateInstance
                                    : FailedStep::AfterCreateInstance,
                                built.vk_result(), core->validation_,
-                               request.required ? Requirement::Required : Requirement::Optional)) {
+                               choice.required ? Requirement::Required : Requirement::Optional)) {
         DVV_LOG_WARN("{} could not be loaded ({}); validation is off", VALIDATION_LAYER,
                      vk::to_string(static_cast<vk::Result>(built.vk_result())));
         core->validation_ = ValidationMode::Off;

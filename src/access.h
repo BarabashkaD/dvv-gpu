@@ -35,6 +35,9 @@ struct Access {
     [[nodiscard]] static DeviceCore& core(const GpuBuffer& buffer) noexcept {
         return *buffer.core_;
     }
+    [[nodiscard]] static VmaAllocation_T* allocation(const GpuBuffer& buffer) noexcept {
+        return buffer.allocation_;
+    }
     [[nodiscard]] static DeviceCore& core(const GpuImage& image) noexcept { return *image.core_; }
     [[nodiscard]] static DeviceCore& core(const ComputePipeline& pipeline) noexcept {
         return *pipeline.core_;

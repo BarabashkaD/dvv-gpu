@@ -97,7 +97,7 @@ elseif(NOT APPLE)
     target_include_directories(dvv_gpu SYSTEM PRIVATE ${X11_INCLUDE_DIR})
 endif()
 
-# dvv-gpu-info: prints every Vulkan device the registry finds (text or --json).
+# dvv-gpu-info: prints every Vulkan device the GPU instance finds (text or --json).
 add_executable(dvv_gpu_info tools/dvv_gpu_info.cpp)
 set_target_properties(dvv_gpu_info PROPERTIES OUTPUT_NAME dvv-gpu-info)
 target_link_libraries(dvv_gpu_info PRIVATE dvv::gpu)

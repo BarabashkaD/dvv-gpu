@@ -8,7 +8,7 @@
 
 namespace dvv::gpu {
 
-// A physical device: its index in the GpuInstance's enumeration (spec §5.2). A strong type, so it
+// A physical device: its index in the GpuInstance's enumeration. A strong type, so it
 // cannot be mixed up with other integers.
 class DeviceId {
 public:
@@ -23,7 +23,7 @@ private:
     std::uint32_t index_;
 };
 
-// Device generation (spec §5.2): 1 for the first device of a context; a device-lost recovery
+// Device generation: 1 for the first device of a context; a device-lost recovery
 // recreates the device with the next generation. GPU resources record their generation.
 using DeviceGeneration = std::uint32_t;
 inline constexpr DeviceGeneration FIRST_GENERATION = 1;

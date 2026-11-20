@@ -99,6 +99,12 @@ Result<void> writeFile(const std::filesystem::path& file, std::span<const std::b
                                   .lostTarget = platform::LostTarget::RemoveTemporary});
 }
 
+// `error` with store()'s context in front of its message.
+std::unexpected<Error> saveError(Error error) {
+    error.message = std::format("saving the pipeline cache failed: {}", error.message);
+    return std::unexpected(std::move(error));
+}
+
 }  // namespace
 
 std::optional<std::string> pipelineCacheMismatch(std::span<const std::byte> data,
@@ -265,7 +271,11 @@ Result<void> PipelineCache::store(bool only_if_changed) {
         return {};
     }
     const std::scoped_lock lock(save_mutex_);
-    DVV_TRY(std::vector<std::byte> data, fetch());
+    Result<std::vector<std::byte>> fetched = fetch();
+    if (!fetched) {
+        return saveError(std::move(fetched).error());
+    }
+    std::vector<std::byte> data = std::move(*fetched);
     const Fingerprint current{.size = data.size(), .checksum = fnv1a64(data)};
     if (only_if_changed && stored_ == current) {
         std::error_code error;
@@ -274,7 +284,9 @@ Result<void> PipelineCache::store(bool only_if_changed) {
         }
     }
     appendTrailer(data, current.checksum);
-    DVV_TRY_VOID(writeFile(file_, data));
+    if (Result<void> written = writeFile(file_, data); !written) {
+        return saveError(std::move(written).error());
+    }
     stored_ = current;
     return {};
 }

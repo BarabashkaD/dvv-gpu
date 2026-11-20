@@ -1,6 +1,6 @@
 #pragma once
 
-// The awaitable of ExecutionContext::submit() (spec §4).
+// The awaitable of submit() (context_vulkan.h).
 
 #include <coroutine>
 #include <cstdint>

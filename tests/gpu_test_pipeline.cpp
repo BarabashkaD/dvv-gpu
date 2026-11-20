@@ -398,6 +398,7 @@ TEST_CASE_FIXTURE(GpuTest, "a pipeline cache path that is a symbolic link is not
         const auto saved = ctx->savePipelineCache();
         REQUIRE_FALSE(saved.has_value());
         CHECK(saved.error().code == dvv::Errc::Io);
+        CHECK(saved.error().message.starts_with("saving the pipeline cache failed: "));
         CHECK(saved.error().message.find("failed: not a regular file") != std::string::npos);
         CHECK(std::filesystem::is_symlink(link));
         CHECK(readFile(real) == one_byte);

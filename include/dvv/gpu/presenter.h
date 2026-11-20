@@ -1,6 +1,6 @@
 #pragma once
 
-// Presentation to one native window (spec §4, §10.2): a Presenter runs its own thread that
+// Presentation to one native window: a Presenter runs its own thread that
 // acquires swapchain images, hands each frame's commands to the context's submit thread and
 // presents. One frame is in flight at a time.
 
@@ -32,9 +32,9 @@ struct Access;
 // transfer function (the image holds linear values). Fixed per swapchain.
 enum class PresentEncoding : std::uint8_t { Linear, Srgb };
 
-// The per-call input of the frame provider. 0.3.x: declared under its old name with the old
-// field kept; PresentFrameParams is the name to use (1.0.0 renames the struct and drops `format`).
-// Deprecated (0.3.0): use PresentFrameParams; removed in 1.0.0.
+// The per-call input of the frame provider. PresentFrameInfo: the 0.3.x name of
+// PresentFrameParams; the name PresentFrameInfo is deprecated (0.3.0) and removed in 1.0.0, which
+// also drops `format`.
 struct PresentFrameInfo {
     platform::PixelSize extent;  // swapchain extent: render at this size for a 1:1 blit
     // Deprecated (0.3.0): use encoding; removed in 1.0.0.
@@ -97,7 +97,7 @@ struct PresenterStats {
     bool failed = false;                    // stopped presenting; see failure()
 };
 
-// Presents to one native window on its own thread (spec §4): acquire, hand the frame's commands to
+// Presents to one native window on its own thread: acquire, hand the frame's commands to
 // the submit thread, present, recreate the swapchain on resize/out-of-date/suboptimal. Created by
 // createPresenter (presenter_vulkan.h); keeps the context alive. resize, show, hide, requestFrame
 // and stats may be called from any thread.

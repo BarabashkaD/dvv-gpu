@@ -1,8 +1,8 @@
 #pragma once
 
-// include/dvv/gpu/context_vulkan.h — the Vulkan entry points of a context and an image.
-// 0.3.x: includes execution_context.h, resources.h, compute_pipeline.h, embedded_shader.h and
-// submission.h. 1.0.0: the same list, with image.h for GpuImage.
+// The Vulkan entry points of a context and an image. 0.3.x: includes execution_context.h,
+// resources.h, compute_pipeline.h, embedded_shader.h and submission.h. 1.0.0: the same list, with
+// image.h for GpuImage.
 
 #include <cstdint>
 #include <memory>
@@ -38,7 +38,8 @@ namespace dvv::gpu {
 [[nodiscard]] VkImage vulkanHandle(const GpuImage& image) noexcept;
 // VK_NULL_HANDLE without STORAGE or SAMPLED usage.
 [[nodiscard]] VkImageView vulkanView(const GpuImage& image) noexcept;
-// The layout the recorded commands leave the image in (acquire load, as today).
+// The layout the recorded commands leave the image in (read with acquire order);
+// VK_IMAGE_LAYOUT_UNDEFINED at first.
 [[nodiscard]] VkImageLayout vulkanLayout(const GpuImage& image) noexcept;
 
 }  // namespace dvv::gpu

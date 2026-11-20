@@ -1,7 +1,7 @@
 #pragma once
 
-// Records the commands of one submission (spec §4, §5.3). The submit thread passes a recorder to
-// the function given to ExecutionContext::submit(); it is valid only during that call.
+// Records the commands of one submission. The submit thread passes a recorder to the function
+// given to submit() (context_vulkan.h); it is valid only during that call.
 //
 // Synchronisation is automatic and conservative: before every work command and before raw() a
 // global memory barrier makes all earlier writes of compute shaders and transfers (also of earlier

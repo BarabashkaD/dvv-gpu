@@ -1,9 +1,9 @@
 #pragma once
 
-// GPU buffers and images (spec §5.3): RAII over a VMA allocation, the Vulkan handle and a debug
+// GPU buffers and images: RAII over a VMA allocation, the Vulkan handle and a debug
 // name, created by an ExecutionContext. The destructor hands the handle and its memory to the
 // context's retire queue, which frees them once the GPU has finished every submission made so far.
-// The host reaches a buffer's memory through the scopes MappedWrite and MappedRead (spec §5.6).
+// The host reaches a buffer's memory through the scopes MappedWrite and MappedRead.
 
 #include <atomic>
 #include <cstddef>
@@ -40,7 +40,7 @@ enum class MemoryUsage : std::uint8_t {
 struct BufferDesc {
     std::uint64_t size = 0;
     // Vulkan usage flags; VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT is always added, because
-    // shaders receive buffers by device address (spec §5.4).
+    // shaders receive buffers by device address.
     VkBufferUsageFlags usage = 0;
     MemoryUsage memory = MemoryUsage::DeviceOnly;
     std::string name{};  // debug name for tools and validation messages

@@ -124,8 +124,7 @@ ExecutionContext::~ExecutionContext() {
     } else {
         try {
             if (const auto saved = pipeline_cache_->saveIfChanged(); !saved) {
-                DVV_LOG_ERROR("saving the pipeline cache of device {} failed: {}", core_->id(),
-                              saved.error().describe());
+                DVV_LOG_ERROR("device {}: {}", core_->id(), saved.error().describe());
             }
         } catch (const std::exception& error) {
             DVV_LOG_ERROR("saving the pipeline cache of device {} failed: {}", core_->id(),

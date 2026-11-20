@@ -78,8 +78,8 @@ Result<std::shared_ptr<ExecutionContext>> GpuInstance::createContext(
     }
     if (options.presentation && !instance_->windowSystem()) {
         return makeError(Errc::Internal,
-                         "ContextOptions::presentation needs a GpuRegistry created with a window "
-                         "system (GpuRegistryOptions::windowSystem)");
+                         "ContextOptions::presentation needs a GPU instance created with a window "
+                         "system (GpuInstanceOptions::windowSystem)");
     }
     DVV_TRY(auto core, detail::DeviceCore::create(shared_from_this(), *instance_,
                                                   instance_->physicalDevices()[id.index()],

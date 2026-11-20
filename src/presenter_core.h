@@ -5,7 +5,7 @@
 // only by its Presenter, created only by ExecutionContext::makePresenter()).
 //
 // Threads: the presenter thread owns every Vulkan object here and the logic; the GUI thread only
-// sets the request block (resize, setVisible, requestFrame) and reads stats and failure; the
+// sets the request block (resize, show, hide, requestFrame) and reads stats and failure; the
 // context's waiter thread posts frame completions into the mailbox. The request block, mailbox,
 // stats and failure are guarded by one mutex. No Vulkan call is made under it.
 

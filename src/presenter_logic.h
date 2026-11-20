@@ -11,7 +11,7 @@
 #include <vulkan/vulkan_core.h>
 
 #include "dvv/base/error.h"
-#include "dvv/platform/native_window.h"
+#include "dvv/platform/pixel_size.h"
 
 namespace dvv::gpu::detail {
 
