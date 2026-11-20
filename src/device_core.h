@@ -124,8 +124,14 @@ public:
     // Errc::DeviceLost "the device was lost" (Driver) or "the device was lost (injected)".
     [[nodiscard]] Error lostError() const;
 
+    // Reserves room in the retire queue for `count` more handles, so retire() never allocates.
+    // Every creator calls it before it creates the Vulkan objects it will retire. Errc::OutOfMemory
+    // on std::bad_alloc.
+    [[nodiscard]] Result<void> reserveRetireSlots(std::size_t count);
+    // Gives back slots of an object that was never created (its creation failed afterwards).
+    void releaseRetireSlots(std::size_t count) noexcept;
     // Queues a handle and its memory for destruction once the work submitted or being recorded so
-    // far is complete.
+    // far is complete. Uses a slot its creator reserved, so it never allocates.
     void retire(RetiredHandle handle, VmaAllocation allocation) noexcept;
     // Frees the retired objects whose timeline value has been reached; returns how many. Under an
     // injected loss the real counter keeps working, so nothing is freed early.
@@ -135,6 +141,9 @@ public:
     // still frees what was submitted and returns lostError().
     [[nodiscard]] Result<void> drain();
     [[nodiscard]] RetireStats retireStats() const noexcept;
+    // White-box (tests): read under retire_mutex_.
+    [[nodiscard]] std::size_t retireSlots() const noexcept;
+    [[nodiscard]] std::size_t retireCapacity() const noexcept;
 
     // The optimal-tiling features of a format (VkFormatProperties3), queried once per format and
     // cached. Any thread.
@@ -176,6 +185,9 @@ private:
 
     mutable std::mutex retire_mutex_;
     std::vector<RetiredObject> retired_;  // not sorted: retire() may race with a submission
+    // The handles of live objects plus those retiring; retired_.size() <= slots_ <=
+    // retired_.capacity().
+    std::size_t slots_ = 0;
     std::uint64_t retired_total_ = 0;
     std::uint64_t freed_total_ = 0;
 

@@ -20,8 +20,10 @@ using dvv::gpu::test::GpuTest;
 
 namespace {
 
-// A buffer made directly through VMA, outside GpuBuffer, to exercise the retire queue alone.
+// A buffer made directly through VMA, outside GpuBuffer, to exercise the retire queue alone. Like
+// a creator, it reserves the retire slot the buffer will use (§5.13).
 vk::Buffer rawBuffer(dvv::gpu::detail::DeviceCore& core, VmaAllocation& allocation) {
+    REQUIRE(core.reserveRetireSlots(1).has_value());
     const vk::BufferCreateInfo info{.size = 256,
                                     .usage = vk::BufferUsageFlagBits::eStorageBuffer,
                                     .sharingMode = vk::SharingMode::eExclusive};

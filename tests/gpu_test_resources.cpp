@@ -242,3 +242,77 @@ TEST_CASE_FIXTURE(GpuTest, "buffers are created and retired from several threads
     CHECK(after.freed - before.freed == BUFFERS);
     CHECK(after.retiring == 0);
 }
+
+// §5.13 F-15: a creator reserves the retire slots its object's destructor uses, so retiring never
+// allocates (the queue's capacity stays as it was while the objects are dropped).
+TEST_CASE_FIXTURE(GpuTest, "retire queue: creation reserves the slots its destructor uses") {
+    constexpr int BUFFERS = 64;
+    constexpr int IMAGES = 32;
+    auto& core = Access::core(context());
+    const std::size_t slots_before = core.retireSlots();
+    std::vector<std::shared_ptr<GpuBuffer>> buffers;
+    std::vector<std::shared_ptr<GpuImage>> images;
+    buffers.reserve(BUFFERS);
+    images.reserve(IMAGES);
+    for (int index = 0; index < BUFFERS; ++index) {
+        buffers.push_back(context()
+                              .createBuffer({.size = 256,
+                                             .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                             .memory = MemoryUsage::HostUpload})
+                              .value());
+    }
+    for (int index = 0; index < IMAGES; ++index) {
+        // A storage image has a view, so it retires two handles.
+        images.push_back(context()
+                             .createImage({.width = 8,
+                                           .height = 8,
+                                           .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                           .usage = VK_IMAGE_USAGE_STORAGE_BIT})
+                             .value());
+    }
+    const auto capacity = core.retireCapacity();
+    buffers.clear();
+    images.clear();
+    CHECK(core.retireCapacity() == capacity);
+    CHECK(context().drain().has_value());
+    CHECK(core.retireSlots() == slots_before);
+}
+
+// §5.13 F-15 (erratum E3): a creation that fails after its reservation gives the slots back, so
+// repeated failures neither keep slots nor grow the queue.
+TEST_CASE_FIXTURE(GpuTest, "retire queue: a failed creation gives its slots back") {
+    constexpr int ATTEMPTS = 100;
+    auto& core = Access::core(context());
+    const ImageDesc probe{.width = 8,
+                          .height = 8,
+                          .format = VK_FORMAT_R16_UINT,
+                          .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                          .name = "too large"};
+    const auto supported = core.physicalDevice().getImageFormatProperties2(
+        {.format = static_cast<vk::Format>(probe.format),
+         .type = vk::ImageType::e2D,
+         .tiling = vk::ImageTiling::eOptimal,
+         .usage = vk::ImageUsageFlags(probe.usage)},
+        core.dispatch());
+    REQUIRE(supported.result == vk::Result::eSuccess);
+    const std::uint32_t max_width = supported.value.imageFormatProperties.maxExtent.width;
+    REQUIRE(max_width < UINT32_MAX);
+    ImageDesc too_large = probe;
+    too_large.width = max_width + 1;
+    const std::size_t slots = core.retireSlots();
+    std::size_t capacity = 0;
+    for (int attempt = 0; attempt < ATTEMPTS; ++attempt) {
+        const auto image = context().createImage(too_large);
+        REQUIRE_FALSE(image.has_value());
+        if (!image) {
+            CHECK(image.error().code == dvv::Errc::Unsupported);
+        }
+        CHECK(core.retireSlots() == slots);
+        if (attempt == 0) {
+            // The first reservation grows the new context's empty queue; the others reuse it.
+            capacity = core.retireCapacity();
+        }
+    }
+    CHECK(core.retireSlots() == slots);
+    CHECK(core.retireCapacity() == capacity);
+}

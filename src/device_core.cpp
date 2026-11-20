@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <format>
 #include <iterator>
+#include <new>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -163,8 +164,32 @@ Error DeviceCore::lostError() const {
         .error();
 }
 
+Result<void> DeviceCore::reserveRetireSlots(std::size_t count) {
+    const std::scoped_lock lock(retire_mutex_);
+    const std::size_t needed = slots_ + count;
+    if (needed > retired_.capacity()) {
+        try {
+            // Geometric, so a creator rarely grows the queue.
+            retired_.reserve(std::max(needed, 2 * retired_.capacity()));
+        } catch (const std::bad_alloc&) {
+            return makeError(Errc::OutOfMemory,
+                             "reserving room in the retire queue: out of memory");
+        }
+    }
+    slots_ = needed;
+    return {};
+}
+
+void DeviceCore::releaseRetireSlots(std::size_t count) noexcept {
+    const std::scoped_lock lock(retire_mutex_);
+    assert(count <= slots_ - retired_.size());  // only slots no retired handle uses
+    slots_ -= count;
+}
+
 void DeviceCore::retire(RetiredHandle handle, VmaAllocation allocation) noexcept {
     const std::scoped_lock lock(retire_mutex_);
+    // The creator reserved this slot (reserveRetireSlots), so the push never allocates.
+    assert(retired_.size() < retired_.capacity());
     // Tagged with the latest reserved submission: any work that used the handle was submitted, or
     // is being recorded, no later.
     retired_.push_back(
@@ -214,21 +239,38 @@ RetireStats DeviceCore::retireStats() const noexcept {
     return {.retiring = retired_.size(), .retired = retired_total_, .freed = freed_total_};
 }
 
+std::size_t DeviceCore::retireSlots() const noexcept {
+    const std::scoped_lock lock(retire_mutex_);
+    return slots_;
+}
+
+std::size_t DeviceCore::retireCapacity() const noexcept {
+    const std::scoped_lock lock(retire_mutex_);
+    return retired_.capacity();
+}
+
 std::size_t DeviceCore::freeRetired(std::uint64_t reached) noexcept {
-    std::vector<RetiredObject> ready;
-    {
-        const std::scoped_lock lock(retire_mutex_);
-        const auto done = std::ranges::stable_partition(
-            retired_,
-            [reached](const RetiredObject& object) { return object.timelineValue > reached; });
-        ready.assign(std::make_move_iterator(done.begin()), std::make_move_iterator(done.end()));
-        retired_.erase(done.begin(), done.end());
-        freed_total_ += ready.size();
+    // Compacted in place under the lock, so nothing is allocated on this noexcept path. Destroying
+    // is host-side freeing and takes no lock of this class; a concurrent retire() waits for it.
+    const std::scoped_lock lock(retire_mutex_);
+    // One pass in queue order: a ready object is destroyed (a view before its image, a pipeline
+    // before its layouts, as they were retired), the others move down in order.
+    auto kept_end = retired_.begin();
+    for (auto object = retired_.begin(); object != retired_.end(); ++object) {
+        if (object->timelineValue > reached) {
+            if (kept_end != object) {
+                *kept_end = std::move(*object);
+            }
+            ++kept_end;
+        } else {
+            destroy(*object);
+        }
     }
-    for (const RetiredObject& object : ready) {
-        destroy(object);
-    }
-    return ready.size();
+    const auto freed = static_cast<std::size_t>(std::distance(kept_end, retired_.end()));
+    retired_.erase(kept_end, retired_.end());
+    slots_ -= freed;
+    freed_total_ += freed;
+    return freed;
 }
 
 void DeviceCore::destroy(const RetiredObject& object) const noexcept {
