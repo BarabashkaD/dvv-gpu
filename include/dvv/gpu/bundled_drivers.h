@@ -20,6 +20,9 @@ enum class DriverChoice : std::uint8_t {
 // empty value counts as unset, as for the loader). Manifests that are not regular files are
 // skipped. Call it before any other thread starts and before the first GpuInstance::create: it
 // sets a process environment variable, which is not synchronised (dvv/base/environment.h).
+// Child processes inherit the variable, and a second call returns UserChoice (the first call's
+// value is now set). Pass absolute paths: the loader resolves a relative one against the current
+// directory when the instance is created.
 // Errc::Unsupported, and nothing set, when an existing manifest's path contains the OS list
 // separator (';' on Windows, ':' elsewhere; on macOS a '/' typed in a Finder name is a ':' in the
 // path): the loader would split the value there. Bundle the drivers under a path without one.

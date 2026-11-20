@@ -106,71 +106,36 @@ public:
     // DeviceLost without recording (the record function is released on resume_on as usual).
     [[nodiscard]] bool lost() const noexcept;
     // Deprecated (0.3.0): use createPresenter(context, options, frames) (presenter_vulkan.h);
-    // removed in 1.0.0. The provider is options.frames.
-    // A presenter for one native window (see presenter.h). Errc::Internal on a
-    // context without ContextOptions::presentation, for an empty frame provider and for a window of
-    // another window system (or none); Errc::Unsupported when the device's queue cannot present to
-    // the window or no swapchain format and usage fit (TRANSFER_DST usage, a UNORM or SRGB format
-    // with BLIT_DST);
-    // surface errors as converted by dvv-gpu (a window system the loader lacks: Unsupported); a
-    // presenter thread that cannot start: Internal (OutOfMemory for std::bad_alloc).
+    // removed in 1.0.0. As that function, with options.frames as the provider.
     [[nodiscard]] Result<std::unique_ptr<Presenter>> createPresenter(PresenterOptions options);
 
     // Deprecated (0.3.0): use createBuffer(context, desc) (context_vulkan.h); removed in 1.0.0.
-    // A buffer. Errc::Internal for a zero size; Vulkan errors as converted by dvv-gpu
-    // (e.g. OutOfMemory). Frees retired memory the GPU has finished with first.
+    // As that function.
     [[nodiscard]] Result<std::shared_ptr<GpuBuffer>> createBuffer(BufferDesc desc);
     // Deprecated (0.3.0): use createImage(context, desc) (context_vulkan.h); removed in 1.0.0.
-    // A 2D image. Errc::Internal when width, height, format or usage is missing;
-    // Errc::Unsupported when the device cannot create it (format, usage or size). STORAGE usage
-    // needs a format with VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT (else Errc::Unsupported "image
-    // '<name>': device <id> has no storage images of <format>"). STORAGE or SAMPLED usage also
-    // creates the image's view (vulkanView(): 2D, the whole image, the image's format), retired
-    // with the image.
+    // As that function.
     [[nodiscard]] Result<std::shared_ptr<GpuImage>> createImage(ImageDesc desc);
     // Deprecated (0.3.0): use GpuBuffer::mapWrite() and mapRead() (see resource_pool.h); removed
     // in 1.0.0.
     // A pool that reuses the buffers it hands out; it keeps this context alive.
     [[nodiscard]] Result<std::shared_ptr<ResourcePool>> createResourcePool();
     // Deprecated (0.3.0): use createComputePipeline(context, shader, push_constant_size)
-    // (context_vulkan.h); removed in 1.0.0.
-    // A compute pipeline from an embedded shader (entry point main) with a
-    // push-constant range of `push_constant_size` bytes (0: none), made through the context's
-    // pipeline cache. The range must cover the shader's push-constant block, which is checked when
-    // the shader has its reflection JSON. Errc::Internal when the shader is not SPIR-V, the size is
-    // not a multiple of 4 or smaller than the block; Errc::Format when the reflection JSON cannot
-    // be read; Errc::Unsupported when the size exceeds the device's limit; Vulkan errors as
-    // converted. The same as createComputePipeline(shader, push_constant_size, ComputeBindings{}).
+    // (context_vulkan.h); removed in 1.0.0. As that function.
     [[nodiscard]] Result<std::shared_ptr<ComputePipeline>> createComputePipeline(
         const EmbeddedShader& shader, std::uint32_t push_constant_size);
     // Deprecated (0.3.0): use createComputePipeline(context, shader, push_constant_size, bindings)
-    // (context_vulkan.h); removed in 1.0.0.
-    // As above, with the storage images the pipeline binds (set 0, bindings 0..storageImages-1,
-    // pushed per dispatch). Errc::Internal when bindings.storageImages exceeds the device's
-    // maxPushDescriptors, or when the shader's reflection declares descriptor bindings other than
-    // set 0, bindings 0..storageImages-1 (checked when the shader has its reflection JSON).
+    // (context_vulkan.h); removed in 1.0.0. As that function.
     [[nodiscard]] Result<std::shared_ptr<ComputePipeline>> createComputePipeline(
         const EmbeddedShader& shader, std::uint32_t push_constant_size, ComputeBindings bindings);
     // Deprecated (0.3.0): use formatFeatures(context, format) (context_vulkan.h); removed in 1.0.0.
-    // The device's optimal-tiling features of a format (VkFormatProperties3), e.g.
-    // VK_FORMAT_FEATURE_2_STORAGE_WRITE_WITHOUT_FORMAT_BIT.
+    // As that function.
     [[nodiscard]] VkFormatFeatureFlags2 formatFeatures(VkFormat format) const;
     // Writes the pipeline cache to ContextOptions::pipelineCacheFile; nothing without a file.
     // Errc::Io when the file cannot be written.
     [[nodiscard]] Result<void> savePipelineCache();
 
     // Deprecated (0.3.0): use submit(context, resume_on, record) (context_vulkan.h); removed in
-    // 1.0.0.
-    // One submission: co_await submit(*ctx, executor, record). The submit thread calls
-    // record with a CommandRecorder, then submits the commands with a signal of the next timeline
-    // value; the awaiting coroutine resumes on `resume_on` once the GPU has finished them, with
-    // that value or the error that stopped the submission. A record function that throws fails the
-    // submission (Errc::Internal); its timeline value is signalled all the same, so later
-    // submissions are not held up. The record function, and everything it captures, is released on
-    // `resume_on` before the coroutine resumes: capturing the resources a submission uses keeps
-    // them alive until the GPU is done with them. An empty record function submits only the final
-    // host-visibility barrier. The record function must not block or wait for another submission:
-    // the submit thread records one submission at a time. `resume_on` must outlive the operation.
+    // 1.0.0. As that function.
     [[nodiscard]] SubmitOperation submit(IExecutor& resume_on, RecordFunction record);
 
     // Waits until the device is idle, then frees everything retired for submissions already on

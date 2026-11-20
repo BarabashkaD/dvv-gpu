@@ -29,7 +29,9 @@ struct Access;
 
 // What the present step does to the values of PresentFrame::image as it writes the window.
 // Linear: copies them as they are (the image holds display-encoded values). Srgb: applies the sRGB
-// transfer function (the image holds linear values). Fixed per swapchain.
+// transfer function (the image holds linear values). Fixed per swapchain. The values are those the
+// blit reads through the image's format: a *_SRGB image is decoded to linear first, so with Linear
+// the window gets linear values. Render into a UNORM (or float) image to control the encoding.
 enum class PresentEncoding : std::uint8_t { Linear, Srgb };
 
 // The per-call input of the frame provider. PresentFrameInfo: the 0.3.x name of

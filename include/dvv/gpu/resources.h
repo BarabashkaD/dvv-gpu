@@ -166,11 +166,8 @@ public:
     // Deprecated (0.3.0): use vulkanHandle() (context_vulkan.h); removed in 1.0.0.
     [[nodiscard]] VkImage handle() const noexcept { return image_; }
     // Deprecated (0.3.0): use vulkanView() (context_vulkan.h); removed in 1.0.0.
-    // The view of the whole image (2D, the image's format); VK_NULL_HANDLE without STORAGE or
-    // SAMPLED usage.
     [[nodiscard]] VkImageView view() const noexcept { return view_; }
     // Deprecated (0.3.0): use vulkanLayout() (context_vulkan.h); removed in 1.0.0.
-    // The layout the recorded commands leave the image in; VK_IMAGE_LAYOUT_UNDEFINED at first.
     [[nodiscard]] VkImageLayout layout() const noexcept {
         return layout_.load(std::memory_order_acquire);
     }

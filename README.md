@@ -9,11 +9,13 @@ searched for only in the Windows system directory.
 
 Headers. The app-facing headers are gpu_instance.h, execution_context.h, presenter.h and
 bundled_drivers.h. The Vulkan entry points are in context_vulkan.h and presenter_vulkan.h. From
-1.0.0 the app-facing headers include no Vulkan header.
+1.0.0 the app-facing headers include no Vulkan header. Headers that only hold dvv-gpu objects by
+pointer or reference include gpu_fwd.h.
 
 ## Build
 
-Builds and tests on Windows (Visual Studio 2026) and Linux (Clang 19 with libstdc++ 14) with
+Builds and tests on Windows (Visual Studio 2026), Linux (Clang 19 with libstdc++ 14) and macOS
+(Apple Silicon) with
 [dvv-build](https://github.com/BarabashkaD/dvv-build), which provides the presets, the shared CMake
 modules, the third-party dependencies (including `slangc`) and the CI workflow; its README lists
 the prerequisites. dvv-build is cloned next to dvv-gpu at the version of the `dvv-build` line in
@@ -30,8 +32,71 @@ cd dvv-gpu
 cmake --workflow --preset vs2026
 ```
 
-On Linux: `./dvv-build/bootstrap.sh`, then `cmake --workflow --preset ninja-clang`.
+On Linux: `./dvv-build/bootstrap.sh`, then `cmake --workflow --preset ninja-clang`. On macOS:
+`./dvv-build/bootstrap.sh`, then `cmake --workflow --preset ninja-macos`.
 Applications use dvv-gpu as a git submodule in their `libs/` folder, next to dvv-build.
+
+## Quick start
+
+A GPU instance, a context on the best device, two buffers and one awaited submission:
+
+```cpp
+#include <cstddef>
+#include <cstring>
+#include <optional>
+
+#include "dvv/base/executors.h"
+#include "dvv/base/task.h"
+#include "dvv/gpu/command_recorder.h"
+#include "dvv/gpu/context_vulkan.h"
+#include "dvv/gpu/gpu_instance.h"
+
+// Fills a buffer on the host, copies it on the GPU and reads the copy back.
+dvv::Task<dvv::Result<void>> copyOnGpu(dvv::gpu::ExecutionContext& context,
+                                       dvv::IExecutor& executor) {
+    auto upload = co_try(createBuffer(context, {.size = 256,
+                                                .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                .memory = dvv::gpu::MemoryUsage::HostUpload}));
+    auto readback = co_try(createBuffer(context, {.size = 256,
+                                                  .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                  .memory = dvv::gpu::MemoryUsage::HostReadback}));
+    dvv::gpu::MappedWrite write = upload->mapWrite();
+    std::memset(write.bytes().data(), 7, write.bytes().size());
+    co_try(write.flush());
+    co_try(co_await submit(context, executor,
+                           [upload, readback](dvv::gpu::CommandRecorder& recorder) {
+                               recorder.copyBuffer(*upload, *readback,
+                                                   dvv::gpu::BufferCopy{.size = 256});
+                           }));
+    const dvv::gpu::MappedRead read = co_try(readback->mapRead());
+    if (read.bytes()[255] != std::byte{7}) {
+        co_return dvv::makeError(dvv::Errc::Internal, "the copy differs");
+    }
+    co_return dvv::Result<void>{};
+}
+
+int main() {
+    auto instance = dvv::gpu::GpuInstance::create({.applicationName = "demo"});
+    if (!instance) {
+        return 1;  // instance.error().message says why, e.g. "Vulkan loader not found"
+    }
+    const std::optional<dvv::gpu::DeviceId> device = (*instance)->bestDevice();
+    if (!device) {
+        return 1;  // no device meets the requirements (see dvv-gpu-info)
+    }
+    auto context = (*instance)->createContext(*device);
+    auto pool = dvv::ExecutorFactory::makeThreadPool(1);
+    if (!context || !pool) {
+        return 1;
+    }
+    return dvv::syncWait(copyOnGpu(**context, **pool)) ? 0 : 1;
+}
+```
+
+`createBuffer` and `submit` are found through their `ExecutionContext` argument. The record function
+runs on the submit thread; capturing the buffers keeps them alive until the GPU has finished the
+copy. Call `flush()` on the write scope before the submission, and `mapRead()` after it completed.
+`syncWait` blocks, so it belongs in `main` or a test; in a coroutine, `co_await` the task.
 
 ## Shaders
 
@@ -39,7 +104,7 @@ Compute shaders are Slang files compiled at build time by the pinned `slangc` of
 prefix and embedded in the program:
 
 ```cmake
-find_package(dvv_gpu 0.1 REQUIRED)   # or dvv_gpu in-tree
+find_package(dvv_gpu 0.3 REQUIRED)   # or dvv_gpu in-tree
 dvv_add_shaders(my_target NAMESPACE my_shaders SHADERS shaders/add_one.slang)
 ```
 
@@ -148,7 +213,9 @@ auto presenter = createPresenter(*context,
 
 `params.encoding` says whether the present step applies the sRGB transfer function:
 `PresentEncoding::Srgb` means the image holds linear values, `Linear` means it holds
-display-encoded values.
+display-encoded values. The values are those the blit reads through the image's format: a `*_SRGB`
+image is decoded to linear first, so with `Linear` the window shows linear values. To control the
+encoding, render into a `UNORM` (or float) image.
 
 A real provider keeps its image while the extent stays the same
 (`PresentFrameParams::previousFrameCompleted` is false after a dropped frame).
@@ -182,6 +249,27 @@ The first cause is logged once (Warn).
 - `dvv/gpu/testing/fault_injection.h` (part of `dvv_gpu`, for tests and an application's
   self-test of device loss) is thread-safe and idempotent; the real device stays healthy.
 
+## Bundled drivers
+
+An application that ships its own Vulkan driver calls `useBundledDrivers(manifests)`
+(bundled_drivers.h) as the first statement of `main`, before any thread starts and before
+`GpuInstance::create`. It sets `VK_DRIVER_FILES` to the manifests that exist, unless
+`VK_DRIVER_FILES` or `VK_ICD_FILENAMES` is already set and not empty, and returns what it did:
+`DriverChoice::Bundled`, `UserChoice` (the user's variable is left as it is) or `NoManifest`
+(nothing set).
+
+- **Errors.** `Errc::Unsupported`, and nothing set, when a manifest's path contains the list
+  separator (`;` on Windows, `:` elsewhere): the loader would split the value there. On macOS a `/`
+  typed in a Finder folder name is a `:` in the path. `Errc::Internal` when the variable cannot be
+  set.
+- **Process-wide.** The variable is part of the process environment: child processes inherit it
+  and use only the bundled driver. A second call in the same process returns `UserChoice`, because
+  the first call's value is now set.
+- **Paths.** Pass absolute paths. The loader reads the variable when the instance is created and
+  resolves a relative path against the current directory at that time.
+- The Vulkan loader ignores the variable in an elevated process (a Windows administrator, a setuid
+  program on Linux).
+
 ## Tests and dvv-gpu-info
 
 CTest tests with the label `gpu`: `dvv_gpu.gpu` (the device tests; the compute demo is
@@ -193,10 +281,6 @@ third-party prefix, and every test fails on a validation message. Environment:
 - `DVV_REQUIRE_GPU=1`: a missing device or display fails the tests instead of skipping them.
 - `DVV_VK_VALIDATION=off|on|sync`: validation mode; default `on` in Debug when the layer is present.
 - `DVV_VK_VALIDATION_REQUIRED=1`: a missing validation layer is an error.
-- An application that ships its own Vulkan driver calls `useBundledDrivers(manifests)`
-  (bundled_drivers.h) as the first statement of `main`, before any thread starts: it sets
-  `VK_DRIVER_FILES` to the manifests that exist, unless `VK_DRIVER_FILES` or `VK_ICD_FILENAMES` is
-  already set and not empty.
 
 ```powershell
 $env:DVV_REQUIRE_GPU='1'; $env:DVV_VK_VALIDATION='sync'; $env:DVV_VK_VALIDATION_REQUIRED='1'
