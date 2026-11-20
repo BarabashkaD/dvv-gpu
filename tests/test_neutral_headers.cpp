@@ -1,6 +1,7 @@
 // The neutral dvv-gpu headers include no Vulkan header.
 #include <memory>
 
+#include "dvv/gpu/bundled_drivers.h"
 #include "dvv/gpu/gpu_fwd.h"
 
 #if defined(VULKAN_CORE_H_)

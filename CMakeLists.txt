@@ -45,6 +45,7 @@ find_path(DVV_VK_BOOTSTRAP_INCLUDE_DIR VkBootstrap.h
     PATHS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES include NO_DEFAULT_PATH REQUIRED)
 
 add_library(dvv_gpu STATIC
+    src/bundled_drivers.cpp
     src/command_recorder.cpp
     src/compute_pipeline.cpp
     src/context_vulkan.cpp

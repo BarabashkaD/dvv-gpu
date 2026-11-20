@@ -9,6 +9,7 @@ dvv_set_compiler_options(dvv_gpu_test_shaders)
 
 add_executable(dvv_gpu_tests
     main.cpp
+    test_bundled_drivers.cpp
     test_device_id.cpp
     test_free_list.cpp
     test_gpu_fwd.cpp
