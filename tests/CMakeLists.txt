@@ -20,6 +20,7 @@ add_executable(dvv_gpu_tests
     test_presenter_core.cpp
     test_presenter_logic.cpp
     test_shaders.cpp
+    test_surface_vulkan.cpp
     test_validation.cpp
     test_vk_result.cpp
     test_window_system.cpp)
@@ -114,7 +115,8 @@ add_executable(dvv_gpu_present_tests
     present_main.cpp
     present_test_device_lost.cpp
     present_test_events.cpp
-    present_test_presenter.cpp)
+    present_test_presenter.cpp
+    present_test_surface.cpp)
 if(APPLE)
     target_sources(dvv_gpu_present_tests PRIVATE present_test_metal.cpp)
 endif()

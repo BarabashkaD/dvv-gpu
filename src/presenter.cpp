@@ -60,7 +60,8 @@ Result<std::unique_ptr<Presenter>> ExecutionContext::createPresenter(PresenterOp
         return makeError(Errc::Internal,
                          std::format("presenter '{}' has no frame provider", options.name));
     }
-    const std::optional<platform::WindowSystem> system = platform::windowSystemOf(options.window);
+    const std::optional<platform::WindowSystem> system =
+        platform::windowHandleOf(options.window).system();
     const std::optional<platform::WindowSystem> wanted = registry_->windowSystem();
     if (!system || system != wanted) {
         const std::string_view have = system ? platform::windowSystemName(*system) : "no window";

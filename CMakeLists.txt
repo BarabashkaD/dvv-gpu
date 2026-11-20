@@ -13,8 +13,8 @@ if(NOT DVV_BUILD_CMAKE_DIR OR NOT IS_ABSOLUTE "${DVV_BUILD_CMAKE_DIR}"
                         "or pass -DDVV_BUILD_CMAKE_DIR=<absolute path of dvv-build>/cmake")
 endif()
 include("${DVV_BUILD_CMAKE_DIR}/DvvDeps.cmake")
-# Adds dvv-base and dvv-platform (native windows, Vulkan surfaces, run-time libraries; dvv-deps.txt)
-# and checks their versions; a stand-alone build tests only this repository.
+# Adds dvv-base and dvv-platform (native windows, run-time libraries; dvv-deps.txt) and checks
+# their versions; a stand-alone build tests only this repository.
 dvv_dependencies()
 
 option(DVV_BUILD_TESTS "Build the dvv tests" ${PROJECT_IS_TOP_LEVEL})
@@ -60,6 +60,7 @@ add_library(dvv_gpu STATIC
     src/resource_pool.cpp
     src/resources.cpp
     src/submitter.cpp
+    src/surface_vulkan.cpp
     src/vk_result.cpp
     src/vma.cpp
     "${DVV_VK_BOOTSTRAP_SOURCE}")
@@ -82,10 +83,16 @@ target_link_libraries(dvv_gpu
     PUBLIC dvv::base dvv::platform Vulkan::Headers
     PRIVATE $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>)
 dvv_set_compiler_options(dvv_gpu)
-# The presenter's stop waits while dispatching sent messages on Windows (design M1b §5.5, R15).
+include("${DVV_BUILD_CMAKE_DIR}/DvvOsSources.cmake")  # checked to exist at the top of the file
+dvv_os_sources(dvv_gpu src/surface_vulkan)
 if(WIN32)
+    # The presenter's stop waits while dispatching sent messages on Windows (design M1b §5.5, R15).
     target_sources(dvv_gpu PRIVATE src/thread_wait_win32.cpp)
     target_link_libraries(dvv_gpu PRIVATE user32)
+elseif(NOT APPLE)
+    # Only the headers (Display, Window for VkXlibSurfaceCreateInfoKHR); nothing calls Xlib here.
+    find_package(X11 REQUIRED)
+    target_include_directories(dvv_gpu SYSTEM PRIVATE ${X11_INCLUDE_DIR})
 endif()
 
 # dvv-gpu-info: prints every Vulkan device the registry finds (text or --json).

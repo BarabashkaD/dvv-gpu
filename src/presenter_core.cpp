@@ -14,9 +14,9 @@
 #include "dvv/base/log.h"
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/platform/surface.h"
 #include "instance.h"
 #include "present_blit.h"
+#include "surface_vulkan.h"
 #include "thread_wait.h"
 #include "vk_result.h"
 
@@ -137,7 +137,7 @@ PresenterCore::PresenterCore(ExecutionContext& context, std::shared_ptr<DeviceCo
       device_(std::move(device)),
       instance_(static_cast<VkInstance>(instance.instance())),
       get_instance_proc_addr_(instance.dispatch().vkGetInstanceProcAddr),
-      window_(options.window),
+      window_(platform::windowHandleOf(options.window)),
       frames_(std::move(options.frames)),
       on_error_(std::move(options.onError)),
       name_(std::move(options.name)),
@@ -153,7 +153,7 @@ PresenterCore::~PresenterCore() {
 }
 
 Result<void> PresenterCore::initialise() {
-    const auto surface = platform::createSurface(instance_, get_instance_proc_addr_, window_);
+    const auto surface = detail::createSurface(instance_, get_instance_proc_addr_, window_);
     if (!surface) {
         return vkError(surface.error(),
                        std::format("creating the window surface of presenter '{}'", name_));

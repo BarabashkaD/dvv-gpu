@@ -39,9 +39,9 @@ struct GpuRegistryOptions {
     // Unset: DVV_VK_VALIDATION_REQUIRED (1 or 0, default 0). When true, a requested validation
     // layer that is not installed is an error (Errc::Unsupported); used by CI.
     std::optional<bool> validationRequired = std::nullopt;
-    // Set: the instance also enables platform::surfaceInstanceExtensions(*windowSystem), so
-    // contexts can present (ContextOptions::presentation); Errc::Unsupported when the loader lacks
-    // them. Unset: headless.
+    // Set: the instance also enables the window system's surface extensions, so contexts can
+    // present (ContextOptions::presentation); Errc::Unsupported when the loader lacks them. Unset:
+    // headless.
     std::optional<platform::WindowSystem> windowSystem = std::nullopt;
 };
 

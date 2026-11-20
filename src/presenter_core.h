@@ -25,6 +25,7 @@
 #include "dvv/base/executor.h"
 #include "dvv/base/move_only_function.h"
 #include "dvv/gpu/presenter.h"
+#include "dvv/platform/window_handle.h"
 #include "presenter_logic.h"
 #include "vk.h"
 
@@ -131,7 +132,7 @@ private:
     std::shared_ptr<DeviceCore> device_;
     VkInstance instance_;
     PFN_vkGetInstanceProcAddr get_instance_proc_addr_;
-    platform::NativeWindow window_;
+    platform::WindowHandle window_;
     FrameProvider frames_;
     PresenterErrorHandler on_error_;
     std::string name_;

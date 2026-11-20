@@ -69,7 +69,7 @@ enum class Requirement : std::uint8_t { Optional, Required };
                                              std::string_view id_name, std::string_view message);
 
 // The instance extensions the GPU instance's window system needs: none for a headless one,
-// otherwise platform::surfaceInstanceExtensions(*options.windowSystem).
+// otherwise detail::surfaceInstanceExtensions(*options.windowSystem) (surface_vulkan.h).
 [[nodiscard]] std::span<const char* const> windowSystemExtensions(
     const GpuInstanceOptions& options) noexcept;
 
@@ -86,9 +86,10 @@ enum class Requirement : std::uint8_t { Optional, Required };
 // through InstanceBuilder constructed with vulkanLoader()'s vkGetInstanceProcAddr, and through its
 // physical-device and device builders without a surface. Never use vkb::destroy_surface,
 // SwapchainBuilder, a selector with a surface, or an entry point without that pointer: it would
-// load vulkan-1.dll with the default search. Surfaces come from dvv::platform::createSurface, and
-// swapchains from Vulkan-Hpp with the device dispatcher. Its tables are not synchronised, so every
-// vk-bootstrap call (instance, physical device or device builders) must hold this mutex.
+// load vulkan-1.dll with the default search. Surfaces come from detail::createSurface
+// (surface_vulkan.h), and swapchains from Vulkan-Hpp with the device dispatcher. Its tables are not
+// synchronised, so every vk-bootstrap call (instance, physical device or device builders) must hold
+// this mutex.
 [[nodiscard]] std::mutex& vkBootstrapMutex();
 
 // Whether a failed instance build is retried without the validation layer: vkCreateInstance itself

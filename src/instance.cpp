@@ -12,8 +12,8 @@
 #include <VkBootstrap.h>
 
 #include "dvv/base/environment.h"
-#include "dvv/platform/surface.h"
 #include "loader.h"
+#include "surface_vulkan.h"
 #include "vk_result.h"
 
 namespace dvv::gpu::detail {
@@ -109,7 +109,7 @@ std::span<const char* const> windowSystemExtensions(const GpuInstanceOptions& op
     if (!options.windowSystem) {
         return {};
     }
-    return platform::surfaceInstanceExtensions(*options.windowSystem);
+    return detail::surfaceInstanceExtensions(*options.windowSystem);
 }
 
 Result<void> requireInstanceExtensions(std::span<const char* const> required,
