@@ -25,26 +25,33 @@ namespace dvv::gpu::detail {
 
 inline constexpr char VALIDATION_LAYER[] = "VK_LAYER_KHRONOS_validation";
 
-// What GpuInstance::create was asked for, before the layer's presence is known.
-struct ValidationRequest {
+// What GpuInstance::create resolved from the options and the environment, before the layer's
+// presence is known.
+struct ValidationChoice {
     ValidationMode mode = ValidationMode::Off;
     bool required = false;
     bool explicitlyRequested = false;  // by the options or DVV_VK_VALIDATION, not by default
 };
+
+// Each enum puts the meaning of the old `false` first.
+enum class BuildType : std::uint8_t { Release, Debug };
+enum class LayerPresence : std::uint8_t { Missing, Installed };
+enum class FailedStep : std::uint8_t { AfterCreateInstance, CreateInstance };
+enum class Requirement : std::uint8_t { Optional, Required };
 
 // "off", "on" or "sync"; Errc::Format otherwise.
 [[nodiscard]] Result<ValidationMode> parseValidationMode(std::string_view text);
 
 // The options win; unset options fall back to the environment values (nullopt or empty = unset),
 // then to the default (On in Debug builds, Off in Release builds; not required).
-[[nodiscard]] Result<ValidationRequest> resolveValidation(
+[[nodiscard]] Result<ValidationChoice> resolveValidation(
     const GpuInstanceOptions& options, const std::optional<std::string>& environment_mode,
-    const std::optional<std::string>& environment_required, bool debug_build);
+    const std::optional<std::string>& environment_required, BuildType build);
 
 // The mode to enable: the requested one when the layer is installed (in version 1.4 or newer);
 // otherwise Off, or Errc::Unsupported when validation is required.
-[[nodiscard]] Result<ValidationMode> effectiveValidation(const ValidationRequest& request,
-                                                         bool layer_installed);
+[[nodiscard]] Result<ValidationMode> effectiveValidation(const ValidationChoice& choice,
+                                                         LayerPresence layer);
 
 // Messenger policy: errors of any type count, and so do validation or performance warnings.
 // General warnings come from the loader and depend on the machine, so they do not count.
@@ -85,12 +92,14 @@ struct ValidationRequest {
 [[nodiscard]] std::mutex& vkBootstrapMutex();
 
 // Whether a failed instance build is retried without the validation layer: vkCreateInstance itself
-// failed (`create_instance_failed`; a later step such as creating the messenger leaves an instance
-// behind), the layer was listed but could not be loaded, and validation is not required. Loaders
-// report that as VK_ERROR_LAYER_NOT_PRESENT (Linux loader 1.3.275) or VK_ERROR_OUT_OF_HOST_MEMORY
-// (Windows loader 1.4.341); a real out-of-memory failure then fails again in the retry.
-[[nodiscard]] bool retryWithoutValidation(bool create_instance_failed, VkResult result,
-                                          ValidationMode validation, bool required) noexcept;
+// failed (`FailedStep::CreateInstance`; a later step such as creating the messenger leaves an
+// instance behind), the layer was listed but could not be loaded, and validation is not required.
+// Loaders report that as VK_ERROR_LAYER_NOT_PRESENT (Linux loader 1.3.275) or
+// VK_ERROR_OUT_OF_HOST_MEMORY (Windows loader 1.4.341); a real out-of-memory failure then fails
+// again in the retry.
+[[nodiscard]] bool retryWithoutValidation(FailedStep step, VkResult result,
+                                          ValidationMode validation,
+                                          Requirement requirement) noexcept;
 
 // Implementation part of GpuInstance (exempt from spec §9.4 registration: owned only by its
 // GPU instance, with the same lifetime). Created only by create(); the public default constructor

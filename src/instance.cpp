@@ -21,9 +21,9 @@ namespace dvv::gpu::detail {
 namespace {
 
 #if defined(NDEBUG)
-constexpr bool DEBUG_BUILD = false;
+constexpr BuildType BUILD_TYPE = BuildType::Release;
 #else
-constexpr bool DEBUG_BUILD = true;
+constexpr BuildType BUILD_TYPE = BuildType::Debug;
 #endif
 
 using Severity = vk::DebugUtilsMessageSeverityFlagBitsEXT;
@@ -135,11 +135,11 @@ std::mutex& vkBootstrapMutex() {
     return mutex;
 }
 
-bool retryWithoutValidation(bool create_instance_failed, VkResult result, ValidationMode validation,
-                            bool required) noexcept {
-    return create_instance_failed &&
+bool retryWithoutValidation(FailedStep step, VkResult result, ValidationMode validation,
+                            Requirement requirement) noexcept {
+    return step == FailedStep::CreateInstance &&
            (result == VK_ERROR_LAYER_NOT_PRESENT || result == VK_ERROR_OUT_OF_HOST_MEMORY) &&
-           validation != ValidationMode::Off && !required;
+           validation != ValidationMode::Off && requirement == Requirement::Optional;
 }
 
 Result<ValidationMode> parseValidationMode(std::string_view text) {
@@ -156,11 +156,12 @@ Result<ValidationMode> parseValidationMode(std::string_view text) {
                      std::format("Vulkan validation mode must be off, on or sync, got '{}'", text));
 }
 
-Result<ValidationRequest> resolveValidation(const GpuInstanceOptions& options,
-                                            const std::optional<std::string>& environment_mode,
-                                            const std::optional<std::string>& environment_required,
-                                            bool debug_build) {
-    ValidationRequest request{.mode = debug_build ? ValidationMode::On : ValidationMode::Off};
+Result<ValidationChoice> resolveValidation(const GpuInstanceOptions& options,
+                                           const std::optional<std::string>& environment_mode,
+                                           const std::optional<std::string>& environment_required,
+                                           BuildType build) {
+    ValidationChoice request{.mode = build == BuildType::Debug ? ValidationMode::On
+                                                               : ValidationMode::Off};
     if (options.validation) {
         request.mode = *options.validation;
         request.explicitlyRequested = true;
@@ -187,15 +188,15 @@ Result<ValidationRequest> resolveValidation(const GpuInstanceOptions& options,
     return request;
 }
 
-Result<ValidationMode> effectiveValidation(const ValidationRequest& request, bool layer_installed) {
-    if (request.mode == ValidationMode::Off || layer_installed) {
-        return request.mode;
+Result<ValidationMode> effectiveValidation(const ValidationChoice& choice, LayerPresence layer) {
+    if (choice.mode == ValidationMode::Off || layer == LayerPresence::Installed) {
+        return choice.mode;
     }
-    if (request.required) {
+    if (choice.required) {
         return makeError(
             Errc::Unsupported,
             std::format("Vulkan validation '{}' is required, but {} 1.4 or newer is not installed",
-                        validationModeName(request.mode), VALIDATION_LAYER));
+                        validationModeName(choice.mode), VALIDATION_LAYER));
     }
     return ValidationMode::Off;
 }
@@ -255,9 +256,9 @@ std::string formatDebugMessage(Severity severity, vk::DebugUtilsMessageTypeFlags
 }
 
 Result<std::unique_ptr<InstanceCore>> InstanceCore::create(const GpuInstanceOptions& options) {
-    DVV_TRY(const ValidationRequest request,
+    DVV_TRY(const ValidationChoice request,
             resolveValidation(options, getEnvironment("DVV_VK_VALIDATION"),
-                              getEnvironment("DVV_VK_VALIDATION_REQUIRED"), DEBUG_BUILD));
+                              getEnvironment("DVV_VK_VALIDATION_REQUIRED"), BUILD_TYPE));
     DVV_TRY(const PFN_vkGetInstanceProcAddr get_instance_proc_addr, vulkanLoader());
 
     auto core = std::make_unique<InstanceCore>();
@@ -290,7 +291,9 @@ Result<std::unique_ptr<InstanceCore>> InstanceCore::create(const GpuInstanceOpti
         DVV_LOG_INFO("{} {} is too old for Vulkan 1.4 and is not used", VALIDATION_LAYER,
                      formatVulkanVersion(layer->specVersion));
     }
-    DVV_TRY(core->validation_, effectiveValidation(request, layer_installed));
+    DVV_TRY(core->validation_,
+            effectiveValidation(
+                request, layer_installed ? LayerPresence::Installed : LayerPresence::Missing));
     if (core->validation_ != request.mode) {
         DVV_LOG(request.explicitlyRequested ? LogLevel::Warn : LogLevel::Info,
                 "Vulkan validation '{}' was requested, but {} 1.4 or newer is not installed; "
@@ -317,8 +320,11 @@ Result<std::unique_ptr<InstanceCore>> InstanceCore::create(const GpuInstanceOpti
     // A layer whose manifest is listed but whose library does not load fails vkCreateInstance;
     // unless validation is required, the instance is built once more without it.
     if (!built &&
-        retryWithoutValidation(built.error() == vkb::InstanceError::failed_create_instance,
-                               built.vk_result(), core->validation_, request.required)) {
+        retryWithoutValidation(built.error() == vkb::InstanceError::failed_create_instance
+                                   ? FailedStep::CreateInstance
+                                   : FailedStep::AfterCreateInstance,
+                               built.vk_result(), core->validation_,
+                               request.required ? Requirement::Required : Requirement::Optional)) {
         DVV_LOG_WARN("{} could not be loaded ({}); validation is off", VALIDATION_LAYER,
                      vk::to_string(static_cast<vk::Result>(built.vk_result())));
         core->validation_ = ValidationMode::Off;

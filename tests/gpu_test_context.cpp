@@ -101,9 +101,9 @@ TEST_CASE_FIXTURE(GpuTest, "a device that misses requirements gets no device") {
     dvv::gpu::GpuInfo info = gpuInstance().devices()[device().index()];
     info.missingRequirements = {"maintenance6"};
     const auto& instance = Access::instance(gpuInstance());
-    const auto core =
-        dvv::gpu::detail::DeviceCore::create(gpuInstance().shared_from_this(), instance,
-                                             instance.physicalDevices()[device().index()], info);
+    const auto core = dvv::gpu::detail::DeviceCore::create(
+        gpuInstance().shared_from_this(), instance, instance.physicalDevices()[device().index()],
+        info, dvv::gpu::ContextOptions{});
     REQUIRE_FALSE(core.has_value());
     CHECK(core.error().code == dvv::Errc::Unsupported);
 }

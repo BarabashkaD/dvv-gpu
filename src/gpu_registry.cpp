@@ -83,7 +83,7 @@ Result<std::shared_ptr<ExecutionContext>> GpuInstance::createContext(
     }
     DVV_TRY(auto core, detail::DeviceCore::create(shared_from_this(), *instance_,
                                                   instance_->physicalDevices()[id.index()],
-                                                  devices_[id.index()], options.presentation));
+                                                  devices_[id.index()], options));
     DVV_TRY(auto pipeline_cache, detail::PipelineCache::create(core, options.pipelineCacheFile));
     DVV_TRY(auto submitter, detail::Submitter::create(core));
     return std::make_shared<ExecutionContext>(

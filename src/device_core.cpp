@@ -18,19 +18,20 @@ namespace dvv::gpu::detail {
 
 Result<std::shared_ptr<DeviceCore>> DeviceCore::create(
     std::shared_ptr<const GpuInstance> gpu_instance, const InstanceCore& instance,
-    const PhysicalDevice& physical, const GpuInfo& info, bool presentation) {
+    const PhysicalDevice& physical, const GpuInfo& info, const ContextOptions& options) {
     if (!info.usable() || !physical.universalQueueFamily) {
         return makeError(
             Errc::Unsupported,
             std::format("device {} ({}) does not meet the requirements", info.id, info.name));
     }
-    DVV_TRY(const std::vector<const char*> extensions, deviceExtensions(info, presentation));
+    DVV_TRY(const std::vector<const char*> extensions,
+            deviceExtensions(info, options.presentation));
     // Every member is set step by step; the destructor releases whatever exists when a step fails.
     auto core = std::make_shared<DeviceCore>();
     core->gpu_instance_ = std::move(gpu_instance);
     core->id_ = info.id;
     core->info_ = info;
-    core->presentation_ = presentation;
+    core->presentation_ = options.presentation;
     core->debug_utils_ = instance.debugUtils();
     core->physical_ = physical.handle;
     // The device is Vulkan 1.4, so the push-descriptor properties may be chained.
@@ -90,7 +91,8 @@ Result<std::shared_ptr<DeviceCore>> DeviceCore::create(
     core->setDebugName(core->queue_, label + " queue");
     core->setDebugName(core->timeline_, label + " timeline");
     DVV_LOG_INFO("Vulkan device created: {} ({}), Vulkan {}{}", info.name, info.id,
-                 formatVulkanVersion(info.apiVersion), presentation ? ", presentation" : "");
+                 formatVulkanVersion(info.apiVersion),
+                 options.presentation ? ", presentation" : "");
     return core;
 }
 
