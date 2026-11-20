@@ -2,23 +2,40 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <utility>
 
 #include "access.h"
 #include "device_core.h"
 #include "dvv/base/error.h"
+#include "dvv/base/executor.h"
 #include "dvv/base/lifetime.h"
+#include "dvv/base/task.h"
+#include "dvv/gpu/command_recorder.h"
+#include "dvv/gpu/compute_pipeline.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
+#include "dvv/gpu/resources.h"
+#include "dvv/gpu/submission.h"
 #include "dvv/platform/native_window.h"
 #include "gpu_fixture.h"
+#include "test_shaders/add_one.h"
 
+using dvv::gpu::BufferDesc;
+using dvv::gpu::CommandRecorder;
+using dvv::gpu::ComputeBindings;
 using dvv::gpu::DeviceId;
 using dvv::gpu::ExecutionContext;
+using dvv::gpu::GpuImage;
+using dvv::gpu::ImageDesc;
 using dvv::gpu::detail::Access;
 using dvv::gpu::test::GpuTest;
 
 namespace {
+
+constexpr std::uint32_t ADD_ONE_PUSH_SIZE = 16;  // add_one: buffer address, count, padding
 
 // A buffer made directly through VMA, outside GpuBuffer, to exercise the retire queue alone. Like
 // a creator, it reserves the retire slot the buffer will use (§5.13).
@@ -33,6 +50,27 @@ vk::Buffer rawBuffer(dvv::gpu::detail::DeviceCore& core, VmaAllocation& allocati
     REQUIRE(vmaCreateBuffer(core.allocator(), &static_cast<const VkBufferCreateInfo&>(info),
                             &allocation_info, &buffer, &allocation, nullptr) == VK_SUCCESS);
     return vk::Buffer(buffer);
+}
+
+// The error code of a failed result; nullopt for a value.
+template <class T>
+std::optional<dvv::Errc> codeOf(const dvv::Result<T>& result) {
+    if (result) {
+        return std::nullopt;
+    }
+    return result.error().code;
+}
+
+dvv::Task<dvv::Result<std::uint64_t>> submitByMember(ExecutionContext& context,
+                                                     dvv::IExecutor& executor,
+                                                     dvv::gpu::RecordFunction record) {
+    co_return co_await context.submit(executor, std::move(record));
+}
+
+dvv::Task<dvv::Result<std::uint64_t>> submitByFunction(ExecutionContext& context,
+                                                       dvv::IExecutor& executor,
+                                                       dvv::gpu::RecordFunction record) {
+    co_return co_await submit(context, executor, std::move(record));
 }
 
 }  // namespace
@@ -185,4 +223,74 @@ TEST_CASE("a context keeps its GPU instance alive") {
     CHECK(kept.use_count() == 1);
     kept.reset();
     CHECK(watch.expired());
+}
+
+TEST_CASE_FIXTURE(GpuTest, "deprecated members still work (0.3.x)") {
+    ExecutionContext& ctx = context();
+
+    const BufferDesc buffer_desc{
+        .size = 256, .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT, .name = "deprecated buffer"};
+    const auto member_buffer = ctx.createBuffer(buffer_desc);
+    const auto free_buffer = createBuffer(ctx, buffer_desc);
+    CHECK(member_buffer.has_value());
+    CHECK(free_buffer.has_value());
+    if (member_buffer && free_buffer) {
+        CHECK((*member_buffer)->size() == (*free_buffer)->size());
+    }
+    CHECK(codeOf(ctx.createBuffer({})) == dvv::Errc::Internal);
+    CHECK(codeOf(createBuffer(ctx, {})) == dvv::Errc::Internal);
+
+    const ImageDesc image_desc{.width = 8,
+                               .height = 4,
+                               .format = VK_FORMAT_R8G8B8A8_UNORM,
+                               .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                               .name = "deprecated image"};
+    const auto member_image = ctx.createImage(image_desc);
+    const auto free_image = createImage(ctx, image_desc);
+    CHECK(member_image.has_value());
+    CHECK(free_image.has_value());
+    if (member_image && free_image) {
+        const GpuImage& by_member = **member_image;
+        const GpuImage& by_function = **free_image;
+        CHECK(by_member.width() == by_function.width());
+        CHECK(by_member.height() == by_function.height());
+        CHECK(by_member.format() == vulkanFormat(by_function));
+        CHECK(by_member.format() == vulkanFormat(by_member));
+    }
+    CHECK(codeOf(ctx.createImage({})) == dvv::Errc::Internal);
+    CHECK(codeOf(createImage(ctx, {})) == dvv::Errc::Internal);
+
+    const auto by_size = ctx.createComputePipeline(test_shaders::addOne(), ADD_ONE_PUSH_SIZE);
+    const auto by_bindings =
+        ctx.createComputePipeline(test_shaders::addOne(), ADD_ONE_PUSH_SIZE, ComputeBindings{});
+    const auto by_function = createComputePipeline(ctx, test_shaders::addOne(), ADD_ONE_PUSH_SIZE);
+    CHECK(by_size.has_value());
+    CHECK(by_bindings.has_value());
+    CHECK(by_function.has_value());
+    if (by_size && by_bindings && by_function) {
+        CHECK((*by_size)->pushConstantSize() == (*by_function)->pushConstantSize());
+        CHECK((*by_bindings)->pushConstantSize() == (*by_function)->pushConstantSize());
+        CHECK((*by_size)->bindings() == (*by_function)->bindings());
+        CHECK((*by_bindings)->bindings() == (*by_function)->bindings());
+    }
+    // Not a multiple of 4.
+    CHECK(codeOf(ctx.createComputePipeline(test_shaders::addOne(), 6)) == dvv::Errc::Internal);
+    CHECK(codeOf(ctx.createComputePipeline(test_shaders::addOne(), 6, ComputeBindings{})) ==
+          dvv::Errc::Internal);
+    CHECK(codeOf(createComputePipeline(ctx, test_shaders::addOne(), 6)) == dvv::Errc::Internal);
+
+    CHECK(ctx.formatFeatures(VK_FORMAT_R8G8B8A8_UNORM) ==
+          formatFeatures(ctx, VK_FORMAT_R8G8B8A8_UNORM));
+
+    const auto first = dvv::syncWait(submitByMember(ctx, executor(), [](CommandRecorder&) {}));
+    const auto second = dvv::syncWait(submitByFunction(ctx, executor(), [](CommandRecorder&) {}));
+    CHECK(first.has_value());
+    CHECK(second.has_value());
+    if (first && second) {
+        CHECK(*second == *first + 1);
+    }
+    const auto throwing = [](CommandRecorder&) { throw std::runtime_error("deprecated submit"); };
+    CHECK(codeOf(dvv::syncWait(submitByMember(ctx, executor(), throwing))) == dvv::Errc::Internal);
+    CHECK(codeOf(dvv::syncWait(submitByFunction(ctx, executor(), throwing))) ==
+          dvv::Errc::Internal);
 }

@@ -17,6 +17,7 @@
 #include "dvv/base/error.h"
 #include "dvv/base/lifetime.h"
 #include "dvv/gpu/command_recorder.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/resources.h"
@@ -144,26 +145,27 @@ TEST_CASE_FIXTURE(GpuTest, "a buffer without a size is a programming error") {
 }
 
 TEST_CASE_FIXTURE(GpuTest, "an image is created undefined and tracks its layout") {
-    const auto image =
-        context()
-            .createImage({.width = 33,
-                          .height = 17,
-                          .format = VK_FORMAT_R32_UINT,
-                          .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-                          .name = "test image"})
-            .value();
+    const auto image = createImage(context(), {.width = 33,
+                                               .height = 17,
+                                               .format = VK_FORMAT_R32_UINT,
+                                               .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                                        VK_IMAGE_USAGE_STORAGE_BIT,
+                                               .name = "test image"})
+                           .value();
+    CHECK(image->name() == "test image");
+    CHECK(vulkanDesc(*image).name == "test image");
     CHECK(image->width() == 33);
     CHECK(image->height() == 17);
-    CHECK(image->format() == VK_FORMAT_R32_UINT);
-    CHECK(image->handle() != VK_NULL_HANDLE);
+    CHECK(vulkanFormat(*image) == VK_FORMAT_R32_UINT);
+    CHECK(vulkanHandle(*image) != VK_NULL_HANDLE);
     CHECK(image->deviceId() == device());
     CHECK(image->generation() == dvv::gpu::FIRST_GENERATION);
     CHECK(image->ownerId() == context().objectId());
-    CHECK(image->layout() == VK_IMAGE_LAYOUT_UNDEFINED);
+    CHECK(vulkanLayout(*image) == VK_IMAGE_LAYOUT_UNDEFINED);
 
     Access::setLayout(*image, VK_IMAGE_LAYOUT_GENERAL);
-    CHECK(image->layout() == VK_IMAGE_LAYOUT_GENERAL);
+    CHECK(vulkanLayout(*image) == VK_IMAGE_LAYOUT_GENERAL);
 }
 
 TEST_CASE_FIXTURE(GpuTest, "images the device cannot create are reported") {

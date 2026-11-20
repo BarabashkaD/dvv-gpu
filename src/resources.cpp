@@ -1,5 +1,6 @@
 #include "dvv/gpu/resources.h"
 
+#include <string_view>
 #include <utility>
 
 #include "device_core.h"
@@ -120,6 +121,10 @@ GpuImage::~GpuImage() {
     }
     core_->retire(vk::Image(image_), allocation_);
     core_->collect();
+}
+
+std::string_view GpuImage::name() const noexcept {
+    return desc_.name;
 }
 
 DeviceId GpuImage::deviceId() const noexcept {

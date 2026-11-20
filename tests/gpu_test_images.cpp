@@ -16,6 +16,7 @@
 #include "dvv/base/error.h"
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/compute_pipeline.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/resources.h"
 #include "gpu_fixture.h"
@@ -233,29 +234,26 @@ TEST_CASE_FIXTURE(GpuTest, "a storage image needs STORAGE usage") {
 }
 
 TEST_CASE_FIXTURE(GpuTest, "view() exists for STORAGE and SAMPLED images only") {
-    const auto transfer = context()
-                              .createImage({.width = 8,
-                                            .height = 8,
-                                            .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                            .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT})
+    const auto transfer = createImage(context(), {.width = 8,
+                                                  .height = 8,
+                                                  .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                                  .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT})
                               .value();
-    CHECK(transfer->view() == VK_NULL_HANDLE);
-    const auto sampled = context()
-                             .createImage({.width = 8,
-                                           .height = 8,
-                                           .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                           .usage = VK_IMAGE_USAGE_SAMPLED_BIT,
-                                           .name = "sampled"})
+    CHECK(vulkanView(*transfer) == VK_NULL_HANDLE);
+    const auto sampled = createImage(context(), {.width = 8,
+                                                 .height = 8,
+                                                 .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                                 .usage = VK_IMAGE_USAGE_SAMPLED_BIT,
+                                                 .name = "sampled"})
                              .value();
-    CHECK(sampled->view() != VK_NULL_HANDLE);
-    const auto storage = context()
-                             .createImage({.width = 8,
-                                           .height = 8,
-                                           .format = VK_FORMAT_R16_UINT,
-                                           .usage = VK_IMAGE_USAGE_STORAGE_BIT,
-                                           .name = "storage"})
+    CHECK(vulkanView(*sampled) != VK_NULL_HANDLE);
+    const auto storage = createImage(context(), {.width = 8,
+                                                 .height = 8,
+                                                 .format = VK_FORMAT_R16_UINT,
+                                                 .usage = VK_IMAGE_USAGE_STORAGE_BIT,
+                                                 .name = "storage"})
                              .value();
-    CHECK(storage->view() != VK_NULL_HANDLE);
+    CHECK(vulkanView(*storage) != VK_NULL_HANDLE);
 }
 
 TEST_CASE_FIXTURE(GpuTest, "pipeline bindings must fit the device and the shader") {

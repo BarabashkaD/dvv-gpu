@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <latch>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -16,8 +17,10 @@
 #include "device_core.h"
 #include "dvv/base/error.h"
 #include "dvv/base/executors.h"
+#include "dvv/base/lifetime.h"
 #include "dvv/base/task.h"
 #include "dvv/gpu/command_recorder.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/resources.h"
 #include "gpu_fixture.h"
@@ -26,6 +29,7 @@
 using dvv::gpu::BufferDesc;
 using dvv::gpu::CommandRecorder;
 using dvv::gpu::GpuBuffer;
+using dvv::gpu::GpuImage;
 using dvv::gpu::MappedRead;
 using dvv::gpu::MappedWrite;
 using dvv::gpu::MemoryUsage;
@@ -57,6 +61,13 @@ dvv::Task<std::thread::id> resumedThread(dvv::gpu::ExecutionContext& context,
                                          dvv::Result<std::uint64_t>& result) {
     result = co_await context.submit(executor, [](CommandRecorder&) {});
     co_return std::this_thread::get_id();
+}
+
+// Whether the lifetime registry lists the object.
+bool isLive(dvv::ObjectId id) {
+    const auto live = dvv::LifetimeRegistry::instance().liveObjects();
+    return std::ranges::any_of(live,
+                               [id](const dvv::LiveObjectInfo& object) { return object.id == id; });
 }
 
 }  // namespace
@@ -203,6 +214,47 @@ TEST_CASE_FIXTURE(GpuTest, "a resource dropped while its submission is recorded 
     REQUIRE(result.has_value());
     // The waiter freed it once the submission had finished.
     CHECK(context().retireStats().retiring == 0);
+}
+
+TEST_CASE_FIXTURE(GpuTest,
+                  "an image dropped while its transition is recorded stays alive until "
+                  "the submission completes") {
+    auto& core = Access::core(context());
+    auto image = createImage(context(), {.width = 8,
+                                         .height = 8,
+                                         .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                         .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                         .name = "dropped while transitioned"})
+                     .value();
+    const dvv::ObjectId id = image->objectId();
+    GpuImage* const raw = image.get();
+    // The executor's only thread waits, so the submission cannot complete before the checks.
+    std::latch release(1);
+    executor().post([&release] { release.wait(); });
+    std::latch recorded(1);
+    std::uint64_t value = 0;
+    dvv::Result<std::uint64_t> result;
+    std::jthread submitting([&] {
+        result = submitAndWait([&](CommandRecorder& recorder) {
+            recorder.transition(*raw, VK_IMAGE_LAYOUT_GENERAL);
+            image.reset();  // the caller's only shared_ptr
+            value = core.lastReservedValue();
+            recorded.count_down();
+        });
+    });
+    recorded.wait();
+    // Once the GPU has finished the submission, only the recorder's reference keeps the image.
+    const vk::Semaphore timeline = core.timeline();
+    const vk::SemaphoreWaitInfo finished{
+        .semaphoreCount = 1, .pSemaphores = &timeline, .pValues = &value};
+    CHECK(core.device().waitSemaphores(finished, std::numeric_limits<std::uint64_t>::max(),
+                                       core.dispatch()) == vk::Result::eSuccess);
+    CHECK(isLive(id));
+    release.count_down();
+    submitting.join();
+    CHECK(result.has_value());
+    CHECK(context().drain().has_value());
+    CHECK_FALSE(isLive(id));
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a record function that throws fails only its own submission") {

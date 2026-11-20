@@ -47,6 +47,7 @@ find_path(DVV_VK_BOOTSTRAP_INCLUDE_DIR VkBootstrap.h
 add_library(dvv_gpu STATIC
     src/command_recorder.cpp
     src/compute_pipeline.cpp
+    src/context_vulkan.cpp
     src/device_core.cpp
     src/devices.cpp
     src/execution_context.cpp

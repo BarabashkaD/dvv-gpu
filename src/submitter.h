@@ -52,7 +52,7 @@ namespace dvv::gpu::detail {
 class DeviceCore;
 struct Access;
 
-// One ctx->submit() on its way through both threads. Allocated when it is queued, so neither
+// One submit(*ctx, ...) on its way through both threads. Allocated when it is queued, so neither
 // thread allocates to hand it on.
 struct Submission {
     RecordFunction record{};

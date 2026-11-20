@@ -13,6 +13,7 @@
 #include "device_core.h"
 #include "dvv/base/log.h"
 #include "dvv/gpu/command_recorder.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "instance.h"
 #include "present_blit.h"
@@ -68,7 +69,7 @@ FrameJob runFrame(PresenterCore* core, ExecutionContext* context, IExecutor* mai
                   RecordFunction record) {
     Result<std::uint64_t> result{};
     try {
-        result = co_await context->submit(*mailbox, std::move(record));
+        result = co_await submit(*context, *mailbox, std::move(record));
     } catch (const std::bad_alloc&) {
         // SubmitOperation::await_suspend could not queue the submission (design M1b §5.1).
         result = makeError(Errc::OutOfMemory, "queuing a presenter frame: out of memory");
@@ -435,20 +436,20 @@ Result<void> PresenterCore::checkImage(const std::shared_ptr<GpuImage>& image) {
     if (&Access::core(*image) != device_.get() || image->generation() != device_->generation()) {
         return makeError(Errc::Internal,
                          std::format("presenter '{}': image '{}' belongs to another context", name_,
-                                     image->desc().name));
+                                     image->name()));
     }
-    if ((image->desc().usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0) {
+    if ((vulkanDesc(*image).usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0) {
         return makeError(Errc::Internal, std::format("presenter '{}': image '{}' lacks "
                                                      "VK_IMAGE_USAGE_TRANSFER_SRC_BIT",
-                                                     name_, image->desc().name));
+                                                     name_, image->name()));
     }
-    const VkFormat format = image->format();
+    const VkFormat format = vulkanFormat(*image);
     if (!presentBlitSource(format, device_->formatFeatures(format))) {
         return makeError(
             Errc::Internal,
             std::format("presenter '{}': the format {} of image '{}' cannot be "
                         "blitted to the swapchain",
-                        name_, vk::to_string(static_cast<vk::Format>(format)), image->desc().name));
+                        name_, vk::to_string(static_cast<vk::Format>(format)), image->name()));
     }
     return {};
 }

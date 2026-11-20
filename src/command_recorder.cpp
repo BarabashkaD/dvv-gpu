@@ -13,6 +13,7 @@
 
 #include "access.h"
 #include "device_core.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "present_blit.h"
 #include "vk.h"
 
@@ -40,8 +41,8 @@ std::string describe(const GpuBuffer& buffer) {
 }
 
 std::string describe(const GpuImage& image) {
-    return std::format("image '{}' ({}x{} {})", image.desc().name, image.width(), image.height(),
-                       vk::to_string(static_cast<vk::Format>(image.format())));
+    return std::format("image '{}' ({}x{} {})", image.name(), image.width(), image.height(),
+                       vk::to_string(static_cast<vk::Format>(vulkanFormat(image))));
 }
 
 std::string layoutName(VkImageLayout layout) {
@@ -51,7 +52,7 @@ std::string layoutName(VkImageLayout layout) {
 // Bytes of the whole image, tightly packed.
 std::uint64_t imageBytes(const GpuImage& image) {
     return std::uint64_t{image.width()} * image.height() *
-           vk::blockSize(static_cast<vk::Format>(image.format()));
+           vk::blockSize(static_cast<vk::Format>(vulkanFormat(image)));
 }
 
 }  // namespace
@@ -124,7 +125,7 @@ void CommandRecorder::dispatch(const ComputePipeline& pipeline,
         std::vector<vk::DescriptorImageInfo> infos(storage_images.size());
         std::vector<vk::WriteDescriptorSet> writes(storage_images.size());
         for (std::size_t index = 0; index < storage_images.size(); ++index) {
-            infos[index] = {.imageView = vk::ImageView(storage_images[index]->view()),
+            infos[index] = {.imageView = vk::ImageView(vulkanView(*storage_images[index])),
                             .imageLayout = vk::ImageLayout::eGeneral};
             writes[index] = {.dstBinding = static_cast<std::uint32_t>(index),
                              .descriptorCount = 1,
@@ -198,7 +199,7 @@ void CommandRecorder::copyBufferToImage(const GpuBuffer& source, GpuImage& desti
     if (!usable()) {
         return;
     }
-    const std::uint64_t texel = vk::blockSize(static_cast<vk::Format>(destination.format()));
+    const std::uint64_t texel = vk::blockSize(static_cast<vk::Format>(vulkanFormat(destination)));
     if (!checkImage("copyBufferToImage", destination, VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
         !checkFormat("copyBufferToImage", destination) ||
         !check(source_offset % texel == 0, "copyBufferToImage",
@@ -214,7 +215,7 @@ void CommandRecorder::copyBufferToImage(const GpuBuffer& source, GpuImage& desti
         .imageSubresource = COLOR_LAYERS,
         .imageExtent = {.width = destination.width(), .height = destination.height(), .depth = 1}};
     vk::CommandBuffer(command_buffer_)
-        .copyBufferToImage(vk::Buffer(source.handle()), vk::Image(destination.handle()),
+        .copyBufferToImage(vk::Buffer(source.handle()), vk::Image(vulkanHandle(destination)),
                            static_cast<vk::ImageLayout>(layout), region, core_->dispatch());
 }
 
@@ -223,7 +224,7 @@ void CommandRecorder::copyImageToBuffer(GpuImage& source, const GpuBuffer& desti
     if (!usable()) {
         return;
     }
-    const std::uint64_t texel = vk::blockSize(static_cast<vk::Format>(source.format()));
+    const std::uint64_t texel = vk::blockSize(static_cast<vk::Format>(vulkanFormat(source)));
     if (!checkImage("copyImageToBuffer", source, VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
         !checkFormat("copyImageToBuffer", source) ||
         !check(destination_offset % texel == 0, "copyImageToBuffer",
@@ -239,7 +240,7 @@ void CommandRecorder::copyImageToBuffer(GpuImage& source, const GpuBuffer& desti
         .imageSubresource = COLOR_LAYERS,
         .imageExtent = {.width = source.width(), .height = source.height(), .depth = 1}};
     vk::CommandBuffer(command_buffer_)
-        .copyImageToBuffer(vk::Image(source.handle()), static_cast<vk::ImageLayout>(layout),
+        .copyImageToBuffer(vk::Image(vulkanHandle(source)), static_cast<vk::ImageLayout>(layout),
                            vk::Buffer(destination.handle()), region, core_->dispatch());
 }
 
@@ -275,8 +276,8 @@ void CommandRecorder::presentBlit(GpuImage& source, VkImage swapchain_image,
     if (!checkImage("presentBlit", source, VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
         return;
     }
-    const VkFormatFeatureFlags2 features = core_->formatFeatures(source.format());
-    if (!check(detail::presentBlitSource(source.format(), features), "presentBlit",
+    const VkFormatFeatureFlags2 features = core_->formatFeatures(vulkanFormat(source));
+    if (!check(detail::presentBlitSource(vulkanFormat(source), features), "presentBlit",
                std::format("{} has a format that cannot be blitted to the swapchain",
                            describe(source))) ||
         !check(swapchain_image != VK_NULL_HANDLE && swapchain_extent.width > 0 &&
@@ -318,7 +319,7 @@ void CommandRecorder::presentBlit(GpuImage& source, VkImage swapchain_image,
             vk::Offset3D{.x = static_cast<std::int32_t>(swapchain_extent.width),
                          .y = static_cast<std::int32_t>(swapchain_extent.height),
                          .z = 1}}};
-    commands.blitImage2({.srcImage = vk::Image(source.handle()),
+    commands.blitImage2({.srcImage = vk::Image(vulkanHandle(source)),
                          .srcImageLayout = static_cast<vk::ImageLayout>(source_layout),
                          .dstImage = target,
                          .dstImageLayout = vk::ImageLayout::eTransferDstOptimal,
@@ -397,13 +398,13 @@ bool CommandRecorder::checkImage(const char* command, const GpuImage& image,
                                  VkImageUsageFlags usage) {
     return check(&detail::Access::core(image) == core_ && image.generation() == core_->generation(),
                  command, std::format("{} belongs to another device", describe(image))) &&
-           check((image.desc().usage & usage) == usage, command,
+           check((vulkanDesc(image).usage & usage) == usage, command,
                  std::format("{} lacks the usage {}", describe(image),
                              vk::to_string(vk::ImageUsageFlags(usage))));
 }
 
 bool CommandRecorder::checkFormat(const char* command, const GpuImage& image) {
-    const auto format = static_cast<vk::Format>(image.format());
+    const auto format = static_cast<vk::Format>(vulkanFormat(image));
     const auto block = vk::blockExtent(format);
     const std::string_view component =
         vk::componentCount(format) > 0 ? vk::componentName(format, 0) : "";
@@ -422,7 +423,7 @@ void CommandRecorder::fail(std::string message) {
 VkImageLayout CommandRecorder::layoutOf(const GpuImage& image) const noexcept {
     const auto recorded = std::ranges::find_if(
         layouts_, [&image](const auto& entry) { return entry.first.get() == &image; });
-    return recorded != layouts_.end() ? recorded->second : image.layout();
+    return recorded != layouts_.end() ? recorded->second : vulkanLayout(image);
 }
 
 void CommandRecorder::barrier(GpuImage* image, VkImageLayout layout) {
@@ -455,7 +456,7 @@ void CommandRecorder::barrier(std::span<GpuImage* const> images, VkImageLayout l
                            .newLayout = static_cast<vk::ImageLayout>(layout),
                            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                           .image = vk::Image(image->handle()),
+                           .image = vk::Image(vulkanHandle(*image)),
                            .subresourceRange = COLOR_RANGE});
         changed.push_back(image);
     }
@@ -468,7 +469,7 @@ void CommandRecorder::barrier(std::span<GpuImage* const> images, VkImageLayout l
         if (recorded != layouts_.end()) {
             recorded->second = layout;
         } else {
-            layouts_.emplace_back(image->shared_from_this(), layout);
+            layouts_.emplace_back(detail::Access::retain(*image), layout);
         }
     }
     const vk::DependencyInfo dependency{

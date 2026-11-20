@@ -93,7 +93,7 @@ public:
     // Moves the image to a layout (nothing when it is already there): GENERAL,
     // TRANSFER_SRC_OPTIMAL or TRANSFER_DST_OPTIMAL (the image needs that transfer usage) or
     // SHADER_READ_ONLY_OPTIMAL (it needs SAMPLED usage); other layouts fail the recorder.
-    // GpuImage::layout() reports the new layout once the submission is on the queue.
+    // vulkanLayout() (context_vulkan.h) reports the new layout once the submission is queued.
     void transition(GpuImage& image, VkImageLayout layout);
 
     // The command buffer for commands of one's own, after the automatic barrier. The caller

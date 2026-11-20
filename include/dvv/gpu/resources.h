@@ -11,6 +11,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 
 #include <vulkan/vulkan_core.h>
 
@@ -143,7 +144,10 @@ private:
     DeviceGeneration generation_;
 };
 
-// Shared from this: the command recorder keeps the images whose layout a submission changes.
+// The Vulkan side of an image (handle, view, format, layout, description) is read through
+// dvv/gpu/context_vulkan.h: vulkanHandle(), vulkanView(), vulkanFormat(), vulkanLayout() and
+// vulkanDesc().
+// Deprecated (0.3.0): this public base is removed in 1.0.0; keep images by their shared_ptr.
 class GpuImage final : public Managed<GpuImage>, public std::enable_shared_from_this<GpuImage> {
 public:
     GpuImage(CreationKey<ExecutionContext> key, std::shared_ptr<detail::DeviceCore> core,
@@ -151,14 +155,20 @@ public:
     // Retires the view, then the image and its memory (see above).
     ~GpuImage();
 
-    [[nodiscard]] const ImageDesc& desc() const noexcept { return desc_; }
+    [[nodiscard]] std::string_view name() const noexcept;  // the debug name given at creation
     [[nodiscard]] std::uint32_t width() const noexcept { return desc_.width; }
     [[nodiscard]] std::uint32_t height() const noexcept { return desc_.height; }
+    // Deprecated (0.3.0): use vulkanDesc() (context_vulkan.h); removed in 1.0.0.
+    [[nodiscard]] const ImageDesc& desc() const noexcept { return desc_; }
+    // Deprecated (0.3.0): use vulkanFormat() (context_vulkan.h); removed in 1.0.0.
     [[nodiscard]] VkFormat format() const noexcept { return desc_.format; }
+    // Deprecated (0.3.0): use vulkanHandle() (context_vulkan.h); removed in 1.0.0.
     [[nodiscard]] VkImage handle() const noexcept { return image_; }
+    // Deprecated (0.3.0): use vulkanView() (context_vulkan.h); removed in 1.0.0.
     // The view of the whole image (2D, the image's format); VK_NULL_HANDLE without STORAGE or
     // SAMPLED usage.
     [[nodiscard]] VkImageView view() const noexcept { return view_; }
+    // Deprecated (0.3.0): use vulkanLayout() (context_vulkan.h); removed in 1.0.0.
     // The layout the recorded commands leave the image in; VK_IMAGE_LAYOUT_UNDEFINED at first.
     [[nodiscard]] VkImageLayout layout() const noexcept {
         return layout_.load(std::memory_order_acquire);
