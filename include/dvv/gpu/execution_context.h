@@ -98,7 +98,7 @@ public:
     // (submit, timeline wait or counter query, device-idle wait, or a presenter's acquire, fence,
     // present or queue-idle call) or testing::injectDeviceLost() was called. Never reset; a new
     // context is the only way on. Presenter losses reach the application through the presenter's
-    // onError (rawreel: Session::reportDeviceLost).
+    // onError.
     // On a lost context the free createBuffer, createImage and createComputePipeline
     // (context_vulkan.h), the members they replace, createResourcePool, and createPresenter
     // (presenter_vulkan.h) and its member return Errc::DeviceLost ("the device was lost" or "the
@@ -128,7 +128,8 @@ public:
     // creates the image's view (vulkanView(): 2D, the whole image, the image's format), retired
     // with the image.
     [[nodiscard]] Result<std::shared_ptr<GpuImage>> createImage(ImageDesc desc);
-    // Deprecated (0.3.0): see resource_pool.h; removed in 1.0.0.
+    // Deprecated (0.3.0): use GpuBuffer::mapWrite() and mapRead() (see resource_pool.h); removed
+    // in 1.0.0.
     // A pool that reuses the buffers it hands out (spec §5.3); it keeps this context alive.
     [[nodiscard]] Result<std::shared_ptr<ResourcePool>> createResourcePool();
     // Deprecated (0.3.0): use createComputePipeline(context, shader, push_constant_size)

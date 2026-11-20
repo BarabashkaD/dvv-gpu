@@ -3,7 +3,6 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <cstddef>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -30,6 +29,14 @@ namespace {
 
 // The OS list separator: ';' where the path separator is '\' (Windows), ':' elsewhere.
 constexpr char SEP = std::filesystem::path::preferred_separator == '\\' ? ';' : ':';
+
+// macOS refuses no value (APFS names are UTF-8 and setenv has no length limit), so the refusal
+// case is reported as skipped there; the Windows and Linux runs cover that branch.
+#if defined(_WIN32) || defined(__linux__)
+constexpr bool REFUSAL_SKIPPED = false;
+#else
+constexpr bool REFUSAL_SKIPPED = true;
+#endif
 
 // A new empty folder, removed with its contents at the end of the scope.
 class TemporaryFolder {
@@ -75,13 +82,28 @@ auto environmentOf(std::map<std::string, std::string> variables) {
     };
 }
 
-// Saves VK_DRIVER_FILES and VK_ICD_FILENAMES, removes both, and restores them at the end of the
-// scope, so that the end-to-end cases start from an environment with no user choice.
+// Saves one environment variable and restores it at the end of the scope. A variable that was set
+// to "" comes back unset: dvv-base sets no empty value, and the loader treats both the same.
+class RestoredVariable {
+public:
+    explicit RestoredVariable(std::string_view name)
+        : name_(name), saved_(dvv::getEnvironment(name)) {}
+    RestoredVariable(const RestoredVariable&) = delete;
+    RestoredVariable& operator=(const RestoredVariable&) = delete;
+    RestoredVariable(RestoredVariable&&) = delete;
+    RestoredVariable& operator=(RestoredVariable&&) = delete;
+    ~RestoredVariable() { static_cast<void>(dvv::setEnvironment(name_, saved_.value_or(""))); }
+
+private:
+    std::string_view name_;
+    std::optional<std::string> saved_;
+};
+
+// Removes VK_DRIVER_FILES and VK_ICD_FILENAMES and restores them at the end of the scope, so that
+// the end-to-end cases start from an environment with no user choice.
 class ClearedDriverVariables {
 public:
-    ClearedDriverVariables()
-        : driver_files_(dvv::getEnvironment("VK_DRIVER_FILES")),
-          icd_filenames_(dvv::getEnvironment("VK_ICD_FILENAMES")) {
+    ClearedDriverVariables() {
         REQUIRE(dvv::setEnvironment("VK_DRIVER_FILES", ""));
         REQUIRE(dvv::setEnvironment("VK_ICD_FILENAMES", ""));
     }
@@ -89,14 +111,13 @@ public:
     ClearedDriverVariables& operator=(const ClearedDriverVariables&) = delete;
     ClearedDriverVariables(ClearedDriverVariables&&) = delete;
     ClearedDriverVariables& operator=(ClearedDriverVariables&&) = delete;
-    ~ClearedDriverVariables() {
-        static_cast<void>(dvv::setEnvironment("VK_DRIVER_FILES", driver_files_.value_or("")));
-        static_cast<void>(dvv::setEnvironment("VK_ICD_FILENAMES", icd_filenames_.value_or("")));
-    }
+    ~ClearedDriverVariables() = default;
 
 private:
-    std::optional<std::string> driver_files_;
-    std::optional<std::string> icd_filenames_;
+    // Both are saved before the constructor's body clears them, so they are restored even when a
+    // REQUIRE there fails.
+    RestoredVariable driver_files_{"VK_DRIVER_FILES"};
+    RestoredVariable icd_filenames_{"VK_ICD_FILENAMES"};
 };
 
 }  // namespace
@@ -178,13 +199,13 @@ TEST_CASE("useBundledDrivers sets VK_DRIVER_FILES") {
     CHECK(dvv::getEnvironment("VK_DRIVER_FILES") == dvv::pathText(manifests[0]));
 }
 
-TEST_CASE("a value the environment refuses gives Errc::Internal") {
+TEST_CASE("a value the environment refuses gives Errc::Internal" * doctest::skip(REFUSAL_SKIPPED)) {
 #if defined(_WIN32)
     // One manifest, repeated until the joined value is 32767 UTF-16 units or longer.
     const TemporaryFolder folder;
     const std::filesystem::path manifest = writeManifest(folder.path() / "a.json");
-    const std::vector<std::filesystem::path> manifests(
-        (32767 / (dvv::pathText(manifest).size() + 1)) + 1, manifest);
+    const std::vector<std::filesystem::path> manifests((32767 / (manifest.native().size() + 1)) + 1,
+                                                       manifest);
 #elif defined(__linux__)
     // A folder name that is not valid UTF-8.
     const TemporaryFolder folder;
@@ -205,6 +226,4 @@ TEST_CASE("a value the environment refuses gives Errc::Internal") {
     }
     CHECK(dvv::getEnvironment("VK_DRIVER_FILES") == std::nullopt);
 #endif
-    // macOS: no value is refused. APFS names are UTF-8 and setenv has no length limit, so the
-    // Windows and Linux runs cover this branch.
 }

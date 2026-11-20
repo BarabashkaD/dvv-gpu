@@ -81,8 +81,8 @@ public:
     // writable by the shader: do not bind an image others read (M4 adds read-only bindings).
     void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
                   std::span<GpuImage* const> storage_images, GroupCount groups);
-    // Deprecated, kept until 1.0.0: the trailing-count forms of the two dispatch() overloads
-    // above; they forward to them with GroupCount{x, y, z}.
+    // Deprecated (0.3.0): use the GroupCount forms above; removed in 1.0.0. These trailing-count
+    // forms forward to them with GroupCount{x, y, z}.
     void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
                   std::uint32_t group_count_x, std::uint32_t group_count_y = 1,
                   std::uint32_t group_count_z = 1);
@@ -98,7 +98,7 @@ public:
     void copyBuffer(const GpuBuffer& source, const GpuBuffer& destination);
     // Copies region.size bytes. Source needs TRANSFER_SRC, destination TRANSFER_DST usage.
     void copyBuffer(const GpuBuffer& source, const GpuBuffer& destination, BufferCopy region);
-    // Deprecated, kept until 1.0.0: the five-value form of the BufferCopy overload above; it
+    // Deprecated (0.3.0): use the BufferCopy form above; removed in 1.0.0. This five-value form
     // forwards to it.
     void copyBuffer(const GpuBuffer& source, std::uint64_t source_offset,
                     const GpuBuffer& destination, std::uint64_t destination_offset,

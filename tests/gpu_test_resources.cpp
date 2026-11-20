@@ -18,6 +18,7 @@
 #include "dvv/base/lifetime.h"
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/context_vulkan.h"
+#include "dvv/gpu/embedded_shader.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/resources.h"
@@ -358,6 +359,19 @@ TEST_CASE_FIXTURE(GpuTest, "retire queue: a failed creation gives its slots back
     }
     CHECK(core.retireSlots() == slots);
     CHECK(core.retireCapacity() == capacity);
+}
+
+// §5.13 F-15: the same for a buffer and a pipeline that fail after their reservation.
+TEST_CASE_FIXTURE(GpuTest, "retire queue: a failed buffer or pipeline gives its slots back") {
+    auto& core = Access::core(context());
+    const std::size_t slots = core.retireSlots();
+    const auto buffer = createBuffer(context(), {.size = 0, .name = "empty"});
+    REQUIRE_FALSE(buffer.has_value());
+    CHECK(core.retireSlots() == slots);
+    const dvv::gpu::EmbeddedShader no_code{.name = "empty"};
+    const auto pipeline = createComputePipeline(context(), no_code, 0);
+    REQUIRE_FALSE(pipeline.has_value());
+    CHECK(core.retireSlots() == slots);
 }
 
 // §5.6: the scoped mapping.

@@ -1,7 +1,7 @@
 # dvv-gpu
 
-Vulkan 1.4 GPU core of the dvv stack used by rawreel, headless unless a window system is asked
-for. C++23; depends on [dvv-base](https://github.com/BarabashkaD/dvv-base),
+Vulkan 1.4 GPU core of the dvv stack, headless unless a window system is asked for. C++23;
+depends on [dvv-base](https://github.com/BarabashkaD/dvv-base),
 [dvv-platform](https://github.com/BarabashkaD/dvv-platform) and on the pinned Vulkan-Headers,
 VulkanMemoryAllocator and vk-bootstrap from the dvv-build third-party prefix. Public headers use
 the Vulkan C types only. The Vulkan loader is loaded at run time, never linked; `vulkan-1.dll` is
@@ -162,8 +162,8 @@ The first cause is logged once (Warn).
 - Waits end once the device is lost, so a silent driver cannot hang them. A lost context does not
   save the pipeline cache.
 - A lost context stays lost; the application destroys it and creates a new one.
-- `dvv/gpu/testing/fault_injection.h` (part of `dvv_gpu`, for tests and `rawreel-gui --selftest
-  lost`) is thread-safe and idempotent; the real device stays healthy.
+- `dvv/gpu/testing/fault_injection.h` (part of `dvv_gpu`, for tests and an application's
+  self-test of device loss) is thread-safe and idempotent; the real device stays healthy.
 
 ## Tests and dvv-gpu-info
 

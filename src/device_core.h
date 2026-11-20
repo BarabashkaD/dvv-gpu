@@ -51,9 +51,9 @@ class DeviceCore {
 public:
     // Creates the device with the required features (and the supported optional ones), its
     // universal queue, the VMA allocator (buffer device addresses; memory budget when present) and
-    // the timeline semaphore. Keeps the GPU instance alive. `options.presentation`
-    // also enables VK_KHR_swapchain (Errc::Unsupported when the device lacks it,
-    // deviceExtensions()); the caller checks that the instance has a window system.
+    // the timeline semaphore. Keeps the GPU instance alive. `options.presentation` also enables
+    // VK_KHR_swapchain (Errc::Unsupported when the device lacks it, deviceExtensions()); the
+    // caller checks that the instance has a window system.
     [[nodiscard]] static Result<std::shared_ptr<DeviceCore>> create(
         std::shared_ptr<const GpuInstance> gpu_instance, const InstanceCore& instance,
         const PhysicalDevice& physical, const GpuInfo& info, const ContextOptions& options);

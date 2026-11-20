@@ -147,7 +147,8 @@ private:
 // The Vulkan side of an image (handle, view, format, layout, description) is read through
 // dvv/gpu/context_vulkan.h: vulkanHandle(), vulkanView(), vulkanFormat(), vulkanLayout() and
 // vulkanDesc().
-// Deprecated (0.3.0): this public base is removed in 1.0.0; keep images by their shared_ptr.
+// Deprecated (0.3.0): the public enable_shared_from_this base; use the image's shared_ptr;
+// removed in 1.0.0.
 class GpuImage final : public Managed<GpuImage>, public std::enable_shared_from_this<GpuImage> {
 public:
     GpuImage(CreationKey<ExecutionContext> key, std::shared_ptr<detail::DeviceCore> core,

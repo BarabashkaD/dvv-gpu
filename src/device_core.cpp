@@ -165,18 +165,26 @@ Error DeviceCore::lostError() const {
 }
 
 Result<void> DeviceCore::reserveRetireSlots(std::size_t count) {
-    const std::scoped_lock lock(retire_mutex_);
-    const std::size_t needed = slots_ + count;
-    if (needed > retired_.capacity()) {
-        try {
-            // Geometric, so a creator rarely grows the queue.
-            retired_.reserve(std::max(needed, 2 * retired_.capacity()));
-        } catch (const std::bad_alloc&) {
-            return makeError(Errc::OutOfMemory,
-                             "reserving room in the retire queue: out of memory");
+    bool reserved = true;
+    {
+        const std::scoped_lock lock(retire_mutex_);
+        const std::size_t needed = slots_ + count;
+        if (needed > retired_.capacity()) {
+            try {
+                // Geometric, so a creator rarely grows the queue.
+                retired_.reserve(std::max(needed, 2 * retired_.capacity()));
+            } catch (const std::bad_alloc&) {
+                reserved = false;
+            }
+        }
+        if (reserved) {
+            slots_ = needed;
         }
     }
-    slots_ = needed;
+    if (!reserved) {
+        // Built after the lock is released: the message allocates too.
+        return makeError(Errc::OutOfMemory, "reserving room in the retire queue: out of memory");
+    }
     return {};
 }
 
@@ -190,6 +198,7 @@ void DeviceCore::retire(RetiredHandle handle, VmaAllocation allocation) noexcept
     const std::scoped_lock lock(retire_mutex_);
     // The creator reserved this slot (reserveRetireSlots), so the push never allocates.
     assert(retired_.size() < retired_.capacity());
+    assert(retired_.size() < slots_);  // a slot was reserved, not only left over in the capacity
     // Tagged with the latest reserved submission: any work that used the handle was submitted, or
     // is being recorded, no later.
     retired_.push_back(
@@ -268,6 +277,7 @@ std::size_t DeviceCore::freeRetired(std::uint64_t reached) noexcept {
     }
     const auto freed = static_cast<std::size_t>(std::distance(kept_end, retired_.end()));
     retired_.erase(kept_end, retired_.end());
+    assert(freed <= slots_);
     slots_ -= freed;
     freed_total_ += freed;
     return freed;

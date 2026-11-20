@@ -250,12 +250,12 @@ TEST_CASE_FIXTURE(GpuTest, "deprecated members still work (0.3.x)") {
     CHECK(member_image.has_value());
     CHECK(free_image.has_value());
     if (member_image && free_image) {
-        const GpuImage& by_member = **member_image;
-        const GpuImage& by_function = **free_image;
-        CHECK(by_member.width() == by_function.width());
-        CHECK(by_member.height() == by_function.height());
-        CHECK(by_member.format() == vulkanFormat(by_function));
-        CHECK(by_member.format() == vulkanFormat(by_member));
+        const GpuImage& image_by_member = **member_image;
+        const GpuImage& image_by_function = **free_image;
+        CHECK(image_by_member.width() == image_by_function.width());
+        CHECK(image_by_member.height() == image_by_function.height());
+        CHECK(image_by_member.format() == vulkanFormat(image_by_function));
+        CHECK(image_by_member.format() == vulkanFormat(image_by_member));
     }
     CHECK(codeOf(ctx.createImage({})) == dvv::Errc::Internal);
     CHECK(codeOf(createImage(ctx, {})) == dvv::Errc::Internal);

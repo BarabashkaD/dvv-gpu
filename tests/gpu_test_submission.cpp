@@ -71,6 +71,25 @@ bool isLive(dvv::ObjectId id) {
                                [id](const dvv::LiveObjectInfo& object) { return object.id == id; });
 }
 
+// Counts a latch down once: at release() or, if a check throws first, when the scope ends.
+class LatchRelease {
+public:
+    explicit LatchRelease(std::latch& latch) noexcept : latch_(&latch) {}
+    LatchRelease(const LatchRelease&) = delete;
+    LatchRelease& operator=(const LatchRelease&) = delete;
+    ~LatchRelease() { release(); }
+
+    void release() noexcept {
+        if (latch_ != nullptr) {
+            latch_->count_down();
+            latch_ = nullptr;
+        }
+    }
+
+private:
+    std::latch* latch_;
+};
+
 }  // namespace
 
 TEST_CASE_FIXTURE(GpuTest, "a buffer is filled and copied on the GPU") {
@@ -225,11 +244,14 @@ TEST_CASE_FIXTURE(GpuTest,
     GpuImage* const raw = image.get();
     // The executor's only thread waits, so the submission cannot complete before the checks.
     std::latch release(1);
-    executor().post([&release] { release.wait(); });
     std::latch recorded(1);
     std::uint64_t value = 0;
     dvv::Result<std::uint64_t> result;
-    std::jthread submitting([&] {
+    // Joined after the guard below released the executor, so a failing check cannot hang the join.
+    std::jthread submitting;
+    executor().post([&release] { release.wait(); });
+    LatchRelease executor_released(release);
+    submitting = std::jthread([&] {
         result = submitAndWait([&](CommandRecorder& recorder) {
             recorder.transition(*raw, VK_IMAGE_LAYOUT_GENERAL);
             image.reset();  // the caller's only shared_ptr
@@ -245,7 +267,7 @@ TEST_CASE_FIXTURE(GpuTest,
     CHECK(core.device().waitSemaphores(finished, std::numeric_limits<std::uint64_t>::max(),
                                        core.dispatch()) == vk::Result::eSuccess);
     CHECK(isLive(id));
-    release.count_down();
+    executor_released.release();
     submitting.join();
     CHECK(result.has_value());
     CHECK(context().drain().has_value());

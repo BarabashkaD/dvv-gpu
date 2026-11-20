@@ -1,6 +1,6 @@
 #pragma once
 
-// Deprecated (0.3.0): include dvv/gpu/gpu_instance.h; removed in 1.0.0.
+// Deprecated (0.3.0): use dvv/gpu/gpu_instance.h; removed in 1.0.0.
 
 #include <cstdint>
 #include <memory>

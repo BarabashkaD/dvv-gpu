@@ -38,8 +38,8 @@ enum class PresentEncoding : std::uint8_t { Linear, Srgb };
 struct PresentFrameInfo {
     platform::PixelSize extent;  // swapchain extent: render at this size for a 1:1 blit
     // Deprecated (0.3.0): use encoding; removed in 1.0.0.
-    VkFormat format = VK_FORMAT_UNDEFINED;  // deprecated: read `encoding`
-    std::uint64_t frameNumber;              // 0, 1, 2, ... per provider call
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    std::uint64_t frameNumber;  // 0, 1, 2, ... per provider call
     // True only when the previous provider call's frame was submitted and completed (its record
     // function ran). False after a dropped frame, a provider error, and for the first call.
     bool previousFrameCompleted;
@@ -47,13 +47,12 @@ struct PresentFrameInfo {
 };
 using PresentFrameParams = PresentFrameInfo;
 
-// Deprecated (0.3.0): reaching PresentFrame and FrameProvider through this header; include
-// presenter_vulkan.h, which declares them from 1.0.0 on.
 // `image` is blitted to the swapchain image (linear scaling when sizes differ and the format has
 // SAMPLED_IMAGE_FILTER_LINEAR, else nearest). It must belong to this context, have TRANSFER_SRC
 // usage and a format with BLIT_SRC (e.g. R8G8B8A8_UNORM). `record` (may be empty) runs first in
 // the same submission. Both are released on the presenter thread once the submission has
 // completed.
+// Deprecated (0.3.0) through presenter.h: use presenter_vulkan.h; removed in 1.0.0.
 struct PresentFrame {
     RecordFunction record{};
     std::shared_ptr<GpuImage> image{};
@@ -66,6 +65,7 @@ struct PresentFrame {
 // record function of a dropped frame is destroyed without running (see
 // PresentFrameParams::previousFrameCompleted). The provider must never wait for the window's
 // thread and must never destroy the presenter.
+// Deprecated (0.3.0) through presenter.h: use presenter_vulkan.h; removed in 1.0.0.
 using FrameProvider = MoveOnlyFunction<Result<PresentFrame>(const PresentFrameParams&)>;
 // Called on the presenter thread; the GUI forwards it (e.g. wx CallAfter). Like the frame
 // provider, it must never wait for the window's thread and must never destroy the presenter.
@@ -80,9 +80,9 @@ struct PresenterOptions {
     platform::NativeWindow window{};  // must outlive the presenter
     platform::PixelSize extent{};     // current client size in physical pixels (a hint)
     bool visible = true;
-    // Deprecated (0.3.0): pass the provider to createPresenter (presenter_vulkan.h), which
-    // refuses it here; removed in 1.0.0. Read only by the deprecated
-    // ExecutionContext::createPresenter.
+    // Deprecated (0.3.0): use createPresenter's `frames` parameter (presenter_vulkan.h); removed
+    // in 1.0.0. That createPresenter refuses a provider here; only the deprecated
+    // ExecutionContext::createPresenter reads it.
     FrameProvider frames{};
     PresenterErrorHandler onError{};
     std::string name = "presenter";  // debug names and log lines
@@ -115,7 +115,8 @@ public:
     void resize(platform::PixelSize extent) noexcept;  // hint; latest wins; requests a frame
     void show() noexcept;                              // frames again; requests a frame
     void hide() noexcept;                              // no frames, no acquires; requests a frame
-    // Deprecated, kept until 1.0.0: show() when `visible`, hide() otherwise.
+    // Deprecated (0.3.0): use show() or hide(); removed in 1.0.0. Calls show() when `visible`,
+    // hide() otherwise.
     void setVisible(bool visible) noexcept;
     void requestFrame() noexcept;  // coalesced until the next frame starts
     [[nodiscard]] PresenterStats stats() const;

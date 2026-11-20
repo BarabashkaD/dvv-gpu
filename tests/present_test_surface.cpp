@@ -27,6 +27,18 @@ std::shared_ptr<GpuInstance> createGpuInstance(const GpuInstanceOptions& options
     return std::move(*gpu_instance);
 }
 
+// The instance and its vkGetInstanceProcAddr, as PresenterCore's constructor reads them.
+struct SurfaceInputs {
+    VkInstance instance = VK_NULL_HANDLE;
+    PFN_vkGetInstanceProcAddr getInstanceProcAddr = nullptr;
+};
+
+SurfaceInputs surfaceInputs(const GpuInstance& gpu_instance) {
+    const detail::InstanceCore& core = detail::Access::instance(gpu_instance);
+    return {.instance = static_cast<VkInstance>(core.instance()),
+            .getInstanceProcAddr = core.dispatch().vkGetInstanceProcAddr};
+}
+
 TestWindow testWindow() {
     auto window = TestWindow::create({.width = 320, .height = 240});
     if (!window) {
@@ -39,25 +51,23 @@ TestWindow testWindow() {
 
 TEST_CASE("a surface is created for a test window and destroyed") {
     const auto gpu_instance = createGpuInstance({.windowSystem = platform::defaultWindowSystem()});
-    // As PresenterCore's constructor reads them.
-    const detail::InstanceCore& core = detail::Access::instance(*gpu_instance);
-    const auto instance = static_cast<VkInstance>(core.instance());
-    const PFN_vkGetInstanceProcAddr get_instance_proc_addr = core.dispatch().vkGetInstanceProcAddr;
+    const auto [instance, get_instance_proc_addr] = surfaceInputs(*gpu_instance);
     const TestWindow window = testWindow();
     const auto surface = detail::createSurface(instance, get_instance_proc_addr, window.handle());
     REQUIRE(surface.has_value());
     if (surface) {
         CHECK(*surface != VK_NULL_HANDLE);
-        core.dispatch().vkDestroySurfaceKHR(instance, *surface, nullptr);  // before the window goes
+        // Before the window goes.
+        detail::Access::instance(*gpu_instance)
+            .dispatch()
+            .vkDestroySurfaceKHR(instance, *surface, nullptr);
     }
     CHECK(gpu_instance->validationMessageCount() == 0);
 }
 
 TEST_CASE("a window with null handles is rejected") {
     const auto gpu_instance = createGpuInstance({.windowSystem = platform::defaultWindowSystem()});
-    const detail::InstanceCore& core = detail::Access::instance(*gpu_instance);
-    const auto instance = static_cast<VkInstance>(core.instance());
-    const PFN_vkGetInstanceProcAddr get_instance_proc_addr = core.dispatch().vkGetInstanceProcAddr;
+    const auto [instance, get_instance_proc_addr] = surfaceInputs(*gpu_instance);
     const TestWindow window = testWindow();
     const WindowHandle real = window.handle();
     const auto words = real.words();
@@ -101,9 +111,7 @@ TEST_CASE("a window with null handles is rejected") {
 
 TEST_CASE("an instance without the surface extensions cannot create surfaces") {
     const auto gpu_instance = createGpuInstance({});
-    const detail::InstanceCore& core = detail::Access::instance(*gpu_instance);
-    const auto instance = static_cast<VkInstance>(core.instance());
-    const PFN_vkGetInstanceProcAddr get_instance_proc_addr = core.dispatch().vkGetInstanceProcAddr;
+    const auto [instance, get_instance_proc_addr] = surfaceInputs(*gpu_instance);
     const TestWindow window = testWindow();
     const auto surface = detail::createSurface(instance, get_instance_proc_addr, window.handle());
     REQUIRE_FALSE(surface.has_value());

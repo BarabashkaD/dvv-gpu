@@ -99,13 +99,18 @@ void addOne(CommandRecorder& recorder, const ComputePipeline& pipeline, const Gp
 // Overload safety (compile time only): every call form of the old trailing-count dispatch and the
 // braced GroupCount forms resolves to exactly one overload.
 template <class Recorder>
-concept DispatchCallForms = requires(Recorder& recorder, const dvv::gpu::ComputePipeline& pipeline,
-                                     std::span<const std::byte> bytes) {
-    recorder.dispatch(pipeline, bytes, 8);
-    recorder.dispatch(pipeline, bytes, 8, 8);
-    recorder.dispatch(pipeline, bytes, {8, 8});
-    recorder.dispatch(pipeline, bytes, {8});
-};
+concept DispatchCallForms =
+    requires(Recorder& recorder, const dvv::gpu::ComputePipeline& pipeline,
+             std::span<const std::byte> bytes, std::span<dvv::gpu::GpuImage* const> images) {
+        recorder.dispatch(pipeline, bytes, 8);
+        recorder.dispatch(pipeline, bytes, 8, 8);
+        recorder.dispatch(pipeline, bytes, {8, 8});
+        recorder.dispatch(pipeline, bytes, {8});
+        recorder.dispatch(pipeline, bytes, images, 8);
+        recorder.dispatch(pipeline, bytes, images, 8, 8);
+        recorder.dispatch(pipeline, bytes, images, {8, 8});
+        recorder.dispatch(pipeline, bytes, images, {8});
+    };
 static_assert(DispatchCallForms<dvv::gpu::CommandRecorder>);
 
 }  // namespace
