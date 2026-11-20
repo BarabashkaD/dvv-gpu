@@ -259,7 +259,7 @@ std::size_t DeviceCore::freeRetired(std::uint64_t reached) noexcept {
     for (auto object = retired_.begin(); object != retired_.end(); ++object) {
         if (object->timelineValue > reached) {
             if (kept_end != object) {
-                *kept_end = std::move(*object);
+                *kept_end = *object;  // trivially copyable
             }
             ++kept_end;
         } else {
