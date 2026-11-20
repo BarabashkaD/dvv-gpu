@@ -377,6 +377,34 @@ TEST_CASE_FIXTURE(GpuTest, "concurrent saves to one pipeline cache file leave a 
     }
 }
 
+#if !defined(_WIN32)  // creating a symbolic link needs a privilege on Windows
+TEST_CASE_FIXTURE(GpuTest, "a pipeline cache path that is a symbolic link is not replaced") {
+    const TemporaryDirectory folder;
+    const std::filesystem::path real = folder.path() / "real.bin";
+    const std::filesystem::path link = folder.path() / "cache.bin";
+    const std::vector<std::byte> one_byte(1, std::byte{'x'});
+    writeFile(real, one_byte);
+    std::filesystem::create_symlink(real, link);
+    {
+        auto ctx = gpuInstance()
+                       .createContext(device(), ContextOptions{.pipelineCacheFile = link})
+                       .value();
+        const auto pipeline =
+            ctx->createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
+        const auto saved = ctx->savePipelineCache();
+        REQUIRE_FALSE(saved.has_value());
+        CHECK(saved.error().code == dvv::Errc::Io);
+        CHECK(saved.error().message.find("is not a regular file") != std::string::npos);
+        CHECK(std::filesystem::is_symlink(link));
+        CHECK(readFile(real) == one_byte);
+        CHECK(temporaryFiles(folder.path()) == 0);
+    }  // closing the context tries to save again and logs the failure
+    CHECK(std::filesystem::is_symlink(link));
+    CHECK(readFile(real) == one_byte);
+    CHECK(temporaryFiles(folder.path()) == 0);
+}
+#endif
+
 TEST_CASE_FIXTURE(GpuTest, "without a file the pipeline cache stays in memory") {
     CHECK(Access::pipelineCache(context()).file().empty());
     CHECK_FALSE(Access::pipelineCache(context()).loaded());
