@@ -15,6 +15,7 @@
 #include "device_core.h"
 #include "dvv/base/log.h"
 #include "dvv/base/paths.h"
+#include "dvv/base/utf8.h"
 #include "vk_result.h"
 
 #if defined(_WIN32)
@@ -46,13 +47,6 @@ std::uint64_t readQuad(std::span<const std::byte> data, std::size_t offset) noex
     std::uint64_t quad = 0;
     std::memcpy(&quad, data.data() + offset, sizeof(quad));
     return quad;
-}
-
-// Paths in messages are UTF-8: path::string() converts to the ANSI code page on Windows and
-// throws for characters outside it (e.g. in the user profile's name).
-std::string utf8(const std::filesystem::path& path) {
-    const std::u8string text = path.u8string();
-    return {reinterpret_cast<const char*>(text.data()), text.size()};
 }
 
 unsigned long long processId() noexcept {
@@ -121,8 +115,8 @@ Result<void> writeFile(const std::filesystem::path& file, std::span<const std::b
         stream.close();
         if (!stream) {
             std::filesystem::remove(temporary, error);
-            return makeError(Errc::Io,
-                             std::format("writing the pipeline cache {} failed", utf8(temporary)));
+            return makeError(Errc::Io, std::format("writing the pipeline cache {} failed",
+                                                   dvv::pathDisplayText(temporary)));
         }
     }
     for (int attempt = 1;; ++attempt) {
@@ -136,7 +130,7 @@ Result<void> writeFile(const std::filesystem::path& file, std::span<const std::b
         const std::string reason = error.message();
         std::filesystem::remove(temporary, error);
         return makeError(Errc::Io, std::format("replacing the pipeline cache {} failed: {}",
-                                               utf8(file), reason));
+                                               dvv::pathDisplayText(file), reason));
     }
     return {};
 }
@@ -229,7 +223,7 @@ Result<std::unique_ptr<PipelineCache>> PipelineCache::create(
             }
         }
         if (!problem.empty()) {
-            DVV_LOG_WARN("pipeline cache {} ignored: {}", utf8(file), problem);
+            DVV_LOG_WARN("pipeline cache {} ignored: {}", dvv::pathDisplayText(file), problem);
         }
     }
 
@@ -238,8 +232,8 @@ Result<std::unique_ptr<PipelineCache>> PipelineCache::create(
     auto cache = core->device().createPipelineCache(info, nullptr, core->dispatch());
     if (cache.result != vk::Result::eSuccess && !initial.empty() &&
         errcOf(cache.result) != Errc::OutOfMemory) {
-        DVV_LOG_WARN("pipeline cache {} ignored: the driver rejected it ({})", utf8(file),
-                     vk::to_string(cache.result));
+        DVV_LOG_WARN("pipeline cache {} ignored: the driver rejected it ({})",
+                     dvv::pathDisplayText(file), vk::to_string(cache.result));
         initial.clear();
         info.initialDataSize = 0;
         info.pInitialData = nullptr;
@@ -250,7 +244,8 @@ Result<std::unique_ptr<PipelineCache>> PipelineCache::create(
     std::unique_ptr<PipelineCache> made;
     try {
         if (loaded) {
-            DVV_LOG_INFO("pipeline cache loaded from {} ({} bytes)", utf8(file), initial.size());
+            DVV_LOG_INFO("pipeline cache loaded from {} ({} bytes)", dvv::pathDisplayText(file),
+                         initial.size());
         }
         made = std::make_unique<PipelineCache>(core, std::move(file), cache.value, loaded);
     } catch (...) {

@@ -20,6 +20,7 @@
 #include "device_core.h"
 #include "dvv/base/error.h"
 #include "dvv/base/log.h"
+#include "dvv/base/utf8.h"
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/compute_pipeline.h"
 #include "dvv/gpu/execution_context.h"
@@ -54,11 +55,6 @@ void writeFile(const std::filesystem::path& file, std::span<const std::byte> dat
     stream.write(reinterpret_cast<const char*>(data.data()),
                  static_cast<std::streamsize>(data.size()));
     REQUIRE(stream.good());
-}
-
-std::string utf8(const std::filesystem::path& path) {
-    const std::u8string text = path.u8string();
-    return {reinterpret_cast<const char*>(text.data()), text.size()};
 }
 
 // The driver's data of a pipeline cache file (checked: it has a matching dvv trailer).
@@ -264,7 +260,7 @@ TEST_CASE_FIXTURE(GpuTest, "the pipeline cache is saved and loaded again") {
         auto loaded =
             registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
         CHECK(Access::pipelineCache(*loaded).loaded());
-        CHECK(log.contains("pipeline cache loaded from " + utf8(file)));
+        CHECK(log.contains("pipeline cache loaded from " + dvv::pathDisplayText(file)));
         CHECK(
             loaded->createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).has_value());
     }
@@ -283,7 +279,7 @@ TEST_CASE_FIXTURE(GpuTest, "the pipeline cache is saved and loaded again") {
 TEST_CASE_FIXTURE(GpuTest, "a corrupt, damaged or foreign pipeline cache file is ignored") {
     const TemporaryDirectory folder;
     const std::filesystem::path file = folder.path() / "pipelines.bin";
-    const std::string ignored = "pipeline cache " + utf8(file) + " ignored: ";
+    const std::string ignored = "pipeline cache " + dvv::pathDisplayText(file) + " ignored: ";
     const CapturedLog log(dvv::LogLevel::Warn);
     {
         std::ofstream stream(file, std::ios::binary);
