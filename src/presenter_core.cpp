@@ -133,13 +133,14 @@ void PresenterMailbox::post(MoveOnlyFunction<void()> work) {
 }
 
 PresenterCore::PresenterCore(ExecutionContext& context, std::shared_ptr<DeviceCore> device,
-                             const InstanceCore& instance, PresenterOptions options)
+                             const InstanceCore& instance, PresenterOptions options,
+                             FrameProvider frames)
     : context_(&context),
       device_(std::move(device)),
       instance_(static_cast<VkInstance>(instance.instance())),
       get_instance_proc_addr_(instance.dispatch().vkGetInstanceProcAddr),
       window_(platform::windowHandleOf(options.window)),
-      frames_(std::move(options.frames)),
+      frames_(std::move(frames)),
       on_error_(std::move(options.onError)),
       name_(std::move(options.name)),
       mailbox_executor_(*this) {

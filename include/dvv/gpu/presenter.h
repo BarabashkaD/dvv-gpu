@@ -47,6 +47,8 @@ struct PresentFrameInfo {
 };
 using PresentFrameParams = PresentFrameInfo;
 
+// Deprecated (0.3.0): reaching PresentFrame and FrameProvider through this header; include
+// presenter_vulkan.h, which declares them from 1.0.0 on.
 // `image` is blitted to the swapchain image (linear scaling when sizes differ and the format has
 // SAMPLED_IMAGE_FILTER_LINEAR, else nearest). It must belong to this context, have TRANSFER_SRC
 // usage and a format with BLIT_SRC (e.g. R8G8B8A8_UNORM). `record` (may be empty) runs first in
@@ -62,9 +64,11 @@ struct PresentFrame {
 // the frame and goes to onError; Errc::DeviceLost, or any error on a lost context, fails the
 // presenter instead (failure(), one onError). The provider is called before the acquire: the
 // record function of a dropped frame is destroyed without running (see
-// PresentFrameParams::previousFrameCompleted).
+// PresentFrameParams::previousFrameCompleted). The provider must never wait for the window's
+// thread and must never destroy the presenter.
 using FrameProvider = MoveOnlyFunction<Result<PresentFrame>(const PresentFrameParams&)>;
-// Called on the presenter thread; the GUI forwards it (e.g. wx CallAfter).
+// Called on the presenter thread; the GUI forwards it (e.g. wx CallAfter). Like the frame
+// provider, it must never wait for the window's thread and must never destroy the presenter.
 using PresenterErrorHandler = MoveOnlyFunction<void(const Error&) noexcept>;
 
 // A MetalWindow's CAMetalLayer: its owner (the GUI thread) sets the layer's frame and contentsScale
@@ -72,9 +76,13 @@ using PresenterErrorHandler = MoveOnlyFunction<void(const Error&) noexcept>;
 // bounds times contentsScale (also for fractional point bounds), i.e. the physical size passed here
 // and to resize().
 struct PresenterOptions {
+    // Deprecated (0.3.0): this field's type becomes dvv::platform::WindowHandle in 1.0.0.
     platform::NativeWindow window{};  // must outlive the presenter
     platform::PixelSize extent{};     // current client size in physical pixels (a hint)
     bool visible = true;
+    // Deprecated (0.3.0): pass the provider to createPresenter (presenter_vulkan.h), which
+    // refuses it here; removed in 1.0.0. Read only by the deprecated
+    // ExecutionContext::createPresenter.
     FrameProvider frames{};
     PresenterErrorHandler onError{};
     std::string name = "presenter";  // debug names and log lines
@@ -91,11 +99,10 @@ struct PresenterStats {
 
 // Presents to one native window on its own thread (spec §4): acquire, hand the frame's commands to
 // the submit thread, present, recreate the swapchain on resize/out-of-date/suboptimal. Created by
-// ExecutionContext::createPresenter(); keeps the context alive. resize, setVisible, requestFrame
+// createPresenter (presenter_vulkan.h); keeps the context alive. resize, setVisible, requestFrame
 // and stats may be called from any thread.
-// On Windows: create and destroy the presenter on the window's thread. The frame provider and
-// onError must never wait for the window's thread and must never destroy the presenter. While a
-// presenter of this context lives, do not call ExecutionContext::drain() on the window's thread.
+// On Windows: create and destroy the presenter on the window's thread. While a presenter of this
+// context lives, do not call ExecutionContext::drain() on the window's thread.
 class Presenter final : public Managed<Presenter> {
 public:
     Presenter(CreationKey<ExecutionContext> key, std::shared_ptr<ExecutionContext> context,

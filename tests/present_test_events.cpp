@@ -11,6 +11,7 @@
 #include "dvv/base/error.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/presenter.h"
+#include "dvv/gpu/presenter_vulkan.h"
 #include "dvv/platform/native_window.h"
 #include "dvv/platform/testing/test_window.h"
 #include "present_fixture.h"
@@ -176,20 +177,21 @@ TEST_CASE_FIXTURE(PresentTest, "two presenters on one context present concurrent
     const auto second_control = std::make_shared<ProviderControl>();
     const auto second_errors = std::make_shared<ErrorLog>();
     const std::unique_ptr<Presenter> p = makePresenter();
-    auto created =
-        context().createPresenter({.window = second->native(),
-                                   .extent = second->clientSize(),
-                                   .visible = true,
-                                   .frames = testFrameProvider(contextPointer(), second_control),
-                                   .onError =
-                                       [log = second_errors](const Error& error) noexcept {
-                                           try {
-                                               log->add(error);
-                                           } catch (const std::exception&) {
-                                               log->addLost();
-                                           }
-                                       },
-                                   .name = "present test 2"});
+    auto created = createPresenter(context(),
+                                   {.window = second->native(),
+                                    .extent = second->clientSize(),
+                                    .visible = true,
+                                    .frames = {},
+                                    .onError =
+                                        [log = second_errors](const Error& error) noexcept {
+                                            try {
+                                                log->add(error);
+                                            } catch (const std::exception&) {
+                                                log->addLost();
+                                            }
+                                        },
+                                    .name = "present test 2"},
+                                   testFrameProvider(contextPointer(), second_control));
     REQUIRE(created.has_value());
     std::unique_ptr<Presenter> q = std::move(*created);
 

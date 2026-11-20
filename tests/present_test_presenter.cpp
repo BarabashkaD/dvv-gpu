@@ -19,6 +19,7 @@
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/presenter.h"
+#include "dvv/gpu/presenter_vulkan.h"
 #include "dvv/platform/native_window.h"
 #include "dvv/platform/testing/test_window.h"
 #include "present_blit.h"
@@ -67,16 +68,16 @@ TEST_CASE_FIXTURE(PresentTest, "the per-call encoding matches the swapchain form
     // The provider runs on the presenter thread, the checks on the test thread.
     std::mutex mutex;
     std::vector<Record> records;
-    PresenterOptions recording = options();
-    recording.frames = [&mutex, &records, frames = std::move(recording.frames)](
-                           const PresentFrameParams& params) mutable -> Result<PresentFrame> {
+    FrameProvider recording =
+        [&mutex, &records,
+         frames = provider()](const PresentFrameParams& params) mutable -> Result<PresentFrame> {
         {
             const std::lock_guard lock(mutex);
             records.push_back({.format = params.format, .encoding = params.encoding});
         }
         return frames(params);
     };
-    auto presenter = context().createPresenter(std::move(recording));
+    auto presenter = createPresenter(context(), options(), std::move(recording));
     REQUIRE(presenter.has_value());
     if (!presenter) {
         return;
@@ -175,14 +176,14 @@ TEST_CASE_FIXTURE(PresentTest, "wrong configurations are refused with Internal")
         REQUIRE(best.has_value());
         const auto headless_context = gpuInstance().createContext(best.value_or(DeviceId(0)), {});
         REQUIRE(headless_context.has_value());
-        const auto result = (*headless_context)->createPresenter(options());
+        const auto result = createPresenter(**headless_context, options(), provider());
         REQUIRE_FALSE(result);
         CHECK(result.error().code == Errc::Internal);
     }
     SUBCASE("no window") {
         PresenterOptions no_window = options();
         no_window.window = std::monostate{};
-        const auto result = context().createPresenter(std::move(no_window));
+        const auto result = createPresenter(context(), std::move(no_window), provider());
         REQUIRE_FALSE(result);
         CHECK(result.error().code == Errc::Internal);
     }
@@ -193,16 +194,24 @@ TEST_CASE_FIXTURE(PresentTest, "wrong configurations are refused with Internal")
 #else
         other.window = platform::Win32Window{};
 #endif
-        const auto result = context().createPresenter(std::move(other));
+        const auto result = createPresenter(context(), std::move(other), provider());
         REQUIRE_FALSE(result);
         CHECK(result.error().code == Errc::Internal);
     }
     SUBCASE("no frame provider") {
-        PresenterOptions no_frames = options();
-        no_frames.frames = {};
-        const auto result = context().createPresenter(std::move(no_frames));
+        const auto result = createPresenter(context(), options(), FrameProvider{});
         REQUIRE_FALSE(result);
         CHECK(result.error().code == Errc::Internal);
+    }
+    SUBCASE("two frame providers (0.3.x)") {
+        PresenterOptions with_frames = options();
+        with_frames.frames = provider();
+        const auto result = createPresenter(context(), std::move(with_frames), provider());
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == Errc::Internal);
+        INFO(result.error().message);
+        CHECK(result.error().message.find("two frame providers") != std::string::npos);
+        CHECK(livePresenters() == 0);
     }
     SUBCASE("presentation on a headless GPU instance") {
         const auto headless = GpuInstance::create({});
@@ -215,6 +224,23 @@ TEST_CASE_FIXTURE(PresentTest, "wrong configurations are refused with Internal")
         CHECK(result.error().code == Errc::Internal);
         CHECK((*headless)->validationMessageCount() == 0);
     }
+}
+
+// Deleted at 1.0.0 with the member and PresenterOptions::frames.
+TEST_CASE_FIXTURE(PresentTest, "the deprecated member still creates a presenter (0.3.x)") {
+    PresenterOptions with_frames = options();
+    with_frames.frames = provider();
+    auto presenter = context().createPresenter(std::move(with_frames));
+    REQUIRE(presenter.has_value());
+    if (!presenter) {
+        return;
+    }
+    REQUIRE(pumpUntil(window(), [&] {
+        (*presenter)->requestFrame();
+        return (*presenter)->stats().framesPresented >= 1;
+    }));
+    CHECK_FALSE((*presenter)->failure());
+    CHECK(errors().size() == 0);
 }
 
 // Design M1b §8.2 case 10.
@@ -230,13 +256,15 @@ TEST_CASE("a presenter's objects are gone after it is destroyed") {
     auto window =
         platform::testing::TestWindow::create({.width = 320, .height = 240}, "dvv present test");
     REQUIRE(window.has_value());
-    auto presenter = (*context)->createPresenter(
-        {.window = window->native(),
-         .extent = window->clientSize(),
-         .visible = true,
-         .frames = testFrameProvider(*context, std::make_shared<ProviderControl>()),
-         .onError = {},
-         .name = "present test"});
+    auto presenter =
+        createPresenter(**context,
+                        {.window = window->native(),
+                         .extent = window->clientSize(),
+                         .visible = true,
+                         .frames = {},
+                         .onError = {},
+                         .name = "present test"},
+                        testFrameProvider(*context, std::make_shared<ProviderControl>()));
     REQUIRE(presenter.has_value());
     REQUIRE(pumpUntil(*window, [&] {
         (*presenter)->requestFrame();

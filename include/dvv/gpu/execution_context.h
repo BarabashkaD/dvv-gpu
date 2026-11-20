@@ -100,11 +100,13 @@ public:
     // context is the only way on. Presenter losses reach the application through the presenter's
     // onError (rawreel: Session::reportDeviceLost).
     // On a lost context the free createBuffer, createImage and createComputePipeline
-    // (context_vulkan.h), the members they replace, createResourcePool and createPresenter return
-    // Errc::DeviceLost ("the device was lost" or "the device was lost (injected)"), and the free
-    // submit() (and the member) completes with DeviceLost without recording (the record function
-    // is released on resume_on as usual).
+    // (context_vulkan.h), the members they replace, createResourcePool, and createPresenter
+    // (presenter_vulkan.h) and its member return Errc::DeviceLost ("the device was lost" or "the
+    // device was lost (injected)"), and the free submit() (and the member) completes with
+    // DeviceLost without recording (the record function is released on resume_on as usual).
     [[nodiscard]] bool lost() const noexcept;
+    // Deprecated (0.3.0): use createPresenter(context, options, frames) (presenter_vulkan.h);
+    // removed in 1.0.0. The provider is options.frames.
     // A presenter for one native window (spec §4, §10.2; see presenter.h). Errc::Internal on a
     // context without ContextOptions::presentation, for an empty frame provider and for a window of
     // another window system (or none); Errc::Unsupported when the device's queue cannot present to
@@ -179,6 +181,11 @@ public:
 private:
     friend struct detail::Access;
     friend class SubmitOperation;
+
+    // The body of createPresenter (presenter_vulkan.h) and of the deprecated member; the provider
+    // is `frames`, options.frames is not read.
+    Result<std::unique_ptr<Presenter>> makePresenter(PresenterOptions options,
+                                                     FrameProvider frames);
 
     std::shared_ptr<GpuInstance> registry_;
     std::shared_ptr<detail::DeviceCore> core_;

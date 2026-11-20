@@ -13,6 +13,7 @@
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/device_id.h"
+#include "dvv/gpu/presenter_vulkan.h"
 #include "dvv/gpu/resources.h"
 
 namespace dvv::gpu::test {
@@ -129,7 +130,7 @@ PresenterOptions PresentTest::options() {
     return {.window = window().native(),
             .extent = window().clientSize(),
             .visible = true,
-            .frames = testFrameProvider(context_, control_),
+            .frames = {},
             .onError =
                 [log = errors_](const Error& error) noexcept {
                     try {
@@ -141,8 +142,12 @@ PresenterOptions PresentTest::options() {
             .name = "present test"};
 }
 
+FrameProvider PresentTest::provider() {
+    return testFrameProvider(context_, control_);
+}
+
 std::unique_ptr<Presenter> PresentTest::makePresenter() {
-    auto presenter = context_->createPresenter(options());
+    auto presenter = createPresenter(*context_, options(), provider());
     if (!presenter) {
         FAIL(presenter.error().describe());
     }

@@ -2,7 +2,7 @@
 
 // The thread behind a Presenter (design M1b §5): surface, swapchain, acquire fence and the loop
 // that executes PresenterLogic's actions. An internal part of Presenter (spec §9.4: exempt, owned
-// only by its Presenter, created only by ExecutionContext::createPresenter()).
+// only by its Presenter, created only by ExecutionContext::makePresenter()).
 //
 // Threads: the presenter thread owns every Vulkan object here and the logic; the GUI thread only
 // sets the request block (resize, setVisible, requestFrame) and reads stats and failure; the
@@ -67,9 +67,10 @@ private:
 class PresenterCore {
 public:
     // Allocates only; no Vulkan object exists yet. `context` and `instance` outlive the core: the
-    // Presenter holds the context, which holds the GPU instance.
+    // Presenter holds the context, which holds the GPU instance. `frames` is the provider;
+    // options.frames is not read.
     PresenterCore(ExecutionContext& context, std::shared_ptr<DeviceCore> device,
-                  const InstanceCore& instance, PresenterOptions options);
+                  const InstanceCore& instance, PresenterOptions options, FrameProvider frames);
     PresenterCore(const PresenterCore&) = delete;
     PresenterCore& operator=(const PresenterCore&) = delete;
     PresenterCore(PresenterCore&&) = delete;
@@ -78,7 +79,7 @@ public:
     ~PresenterCore();
 
     // Surface, present support, swapchain usage and format, acquire fence (errors: see
-    // ExecutionContext::createPresenter).
+    // createPresenter in presenter_vulkan.h).
     [[nodiscard]] Result<void> initialise();
     // Starts the presenter thread; throws std::system_error or std::bad_alloc.
     void start();

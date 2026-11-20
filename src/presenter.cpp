@@ -10,6 +10,7 @@
 #include "access.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
+#include "dvv/gpu/presenter_vulkan.h"
 #include "presenter_core.h"
 
 namespace dvv::gpu {
@@ -46,7 +47,25 @@ std::optional<Error> Presenter::failure() const {
     return core_->failure();
 }
 
+Result<std::unique_ptr<Presenter>> createPresenter(ExecutionContext& context,
+                                                   PresenterOptions options, FrameProvider frames) {
+    // 0.3.x: a provider in the options as well would be dropped silently by either choice.
+    if (options.frames) {
+        return makeError(Errc::Internal,
+                         std::format("presenter '{}' has two frame providers", options.name));
+    }
+    return detail::Access::makePresenter(context, std::move(options), std::move(frames));
+}
+
 Result<std::unique_ptr<Presenter>> ExecutionContext::createPresenter(PresenterOptions options) {
+    // Moved out first: the order in which makePresenter's parameters are initialised is
+    // unspecified.
+    FrameProvider frames = std::move(options.frames);
+    return makePresenter(std::move(options), std::move(frames));
+}
+
+Result<std::unique_ptr<Presenter>> ExecutionContext::makePresenter(PresenterOptions options,
+                                                                   FrameProvider frames) {
     if (core_->lost()) {
         return std::unexpected(core_->lostError());
     }
@@ -56,7 +75,7 @@ Result<std::unique_ptr<Presenter>> ExecutionContext::createPresenter(PresenterOp
                                      "without ContextOptions::presentation",
                                      options.name, deviceId()));
     }
-    if (!options.frames) {
+    if (!frames) {
         return makeError(Errc::Internal,
                          std::format("presenter '{}' has no frame provider", options.name));
     }
@@ -73,7 +92,7 @@ Result<std::unique_ptr<Presenter>> ExecutionContext::createPresenter(PresenterOp
                                      options.name, have, need));
     }
     auto core = std::make_unique<detail::PresenterCore>(
-        *this, core_, detail::Access::instance(*registry_), std::move(options));
+        *this, core_, detail::Access::instance(*registry_), std::move(options), std::move(frames));
     DVV_TRY_VOID(core->initialise());
     try {
         core->start();

@@ -16,6 +16,7 @@
 #include "dvv/gpu/embedded_shader.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
+#include "dvv/gpu/presenter.h"
 #include "dvv/gpu/resources.h"
 #include "dvv/gpu/submission.h"
 #include "instance.h"
@@ -90,6 +91,12 @@ struct Access {
     [[nodiscard]] static SubmitOperation submit(ExecutionContext& context, IExecutor& resume_on,
                                                 RecordFunction record) {
         return context.submit(resume_on, std::move(record));
+    }
+    // presenter_vulkan.h's createPresenter reaches the context's private creator.
+    [[nodiscard]] static Result<std::unique_ptr<Presenter>> makePresenter(ExecutionContext& context,
+                                                                          PresenterOptions options,
+                                                                          FrameProvider frames) {
+        return context.makePresenter(std::move(options), std::move(frames));
     }
 
     // The fields behind context_vulkan.h's image accessors.

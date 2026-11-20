@@ -17,6 +17,7 @@
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/presenter.h"
+#include "dvv/gpu/presenter_vulkan.h"
 #include "dvv/platform/testing/test_window.h"
 
 namespace dvv::gpu::test {
@@ -78,9 +79,12 @@ public:
     [[nodiscard]] ProviderControl& control() const noexcept { return *control_; }
     [[nodiscard]] const ErrorLog& errors() const noexcept { return *errors_; }
 
-    // Options for the fixture's window, provider and error log.
+    // Options for the fixture's window and error log; `frames` stays empty (see provider()).
     [[nodiscard]] PresenterOptions options();
-    // createPresenter(options()), REQUIREd.
+    // The fixture's frame provider: testFrameProvider on control(), so failNext and throwNext
+    // steer it.
+    [[nodiscard]] FrameProvider provider();
+    // createPresenter(context(), options(), provider()), REQUIREd.
     [[nodiscard]] std::unique_ptr<Presenter> makePresenter();
 
 private:
