@@ -27,14 +27,25 @@ class PresenterCore;
 struct Access;
 }  // namespace detail
 
+// What the present step does to the values of PresentFrame::image as it writes the window.
+// Linear: copies them as they are (the image holds display-encoded values). Srgb: applies the sRGB
+// transfer function (the image holds linear values). Fixed per swapchain.
+enum class PresentEncoding : std::uint8_t { Linear, Srgb };
+
+// The per-call input of the frame provider. 0.3.x: declared under its old name with the old
+// field kept; PresentFrameParams is the name to use (1.0.0 renames the struct and drops `format`).
+// Deprecated (0.3.0): use PresentFrameParams; removed in 1.0.0.
 struct PresentFrameInfo {
     platform::PixelSize extent;  // swapchain extent: render at this size for a 1:1 blit
-    VkFormat format;             // swapchain format (informational; the blit converts)
-    std::uint64_t frameNumber;   // 0, 1, 2, ... per provider call
+    // Deprecated (0.3.0): use encoding; removed in 1.0.0.
+    VkFormat format = VK_FORMAT_UNDEFINED;  // deprecated: read `encoding`
+    std::uint64_t frameNumber;              // 0, 1, 2, ... per provider call
     // True only when the previous provider call's frame was submitted and completed (its record
     // function ran). False after a dropped frame, a provider error, and for the first call.
     bool previousFrameCompleted;
+    PresentEncoding encoding = PresentEncoding::Linear;  // appended in 0.3.0
 };
+using PresentFrameParams = PresentFrameInfo;
 
 // `image` is blitted to the swapchain image (linear scaling when sizes differ and the format has
 // SAMPLED_IMAGE_FILTER_LINEAR, else nearest). It must belong to this context, have TRANSFER_SRC
@@ -51,8 +62,8 @@ struct PresentFrame {
 // the frame and goes to onError; Errc::DeviceLost, or any error on a lost context, fails the
 // presenter instead (failure(), one onError). The provider is called before the acquire: the
 // record function of a dropped frame is destroyed without running (see
-// PresentFrameInfo::previousFrameCompleted).
-using FrameProvider = MoveOnlyFunction<Result<PresentFrame>(const PresentFrameInfo&)>;
+// PresentFrameParams::previousFrameCompleted).
+using FrameProvider = MoveOnlyFunction<Result<PresentFrame>(const PresentFrameParams&)>;
 // Called on the presenter thread; the GUI forwards it (e.g. wx CallAfter).
 using PresenterErrorHandler = MoveOnlyFunction<void(const Error&) noexcept>;
 

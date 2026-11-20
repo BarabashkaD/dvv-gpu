@@ -76,7 +76,7 @@ public:
     // Not visible, a 0-sized hint, or a surface hidden until the next GUI event.
     [[nodiscard]] bool hidden() const noexcept;
     [[nodiscard]] bool inFlight() const noexcept { return phase_ == Phase::InFlight; }
-    // For PresentFrameInfo: true only when the previous provider call's frame completed.
+    // For PresentFrameParams: true only when the previous provider call's frame completed.
     [[nodiscard]] bool previousFrameCompleted() const noexcept { return previous_completed_; }
     // The GUI's latest size hint (used for swapchain creation when currentExtent is 0xFFFFFFFF).
     [[nodiscard]] platform::PixelSize extentHint() const noexcept { return extent_; }

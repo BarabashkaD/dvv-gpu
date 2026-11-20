@@ -212,6 +212,7 @@ Result<void> PresenterCore::initialise() {
                         name_, vk::to_string(static_cast<vk::Format>(format->format))));
     }
     format_ = *format;
+    encoding_ = presentEncoding(format_.format);
     const auto fence = device_->device().createFence(vk::FenceCreateInfo{}, nullptr, api);
     DVV_TRY_VOID(vkCheck(fence.result, "vkCreateFence"));
     fence_ = fence.value;
@@ -373,11 +374,12 @@ void PresenterCore::step(Action action) {
 
 // design M1b §5.2 RenderFrame, steps 1-5.
 void PresenterCore::renderFrame() {
-    const PresentFrameInfo info{.extent = {.width = extent_.width, .height = extent_.height},
-                                .format = format_.format,
-                                .frameNumber = frame_number_++,
-                                .previousFrameCompleted = logic_.previousFrameCompleted()};
-    Result<PresentFrame> provided = callProvider(info);  // step 1
+    const PresentFrameParams params{.extent = {.width = extent_.width, .height = extent_.height},
+                                    .format = format_.format,
+                                    .frameNumber = frame_number_++,
+                                    .previousFrameCompleted = logic_.previousFrameCompleted(),
+                                    .encoding = encoding_};
+    Result<PresentFrame> provided = callProvider(params);  // step 1
     if (provided) {
         if (auto usable = checkImage(provided->image); !usable) {   // step 2
             provided = std::unexpected(std::move(usable).error());  // the frame is released unrun
@@ -406,9 +408,9 @@ void PresenterCore::renderFrame() {
     startFrame(std::move(*provided), index);
 }
 
-Result<PresentFrame> PresenterCore::callProvider(const PresentFrameInfo& info) {
+Result<PresentFrame> PresenterCore::callProvider(const PresentFrameParams& params) {
     try {
-        return frames_(info);
+        return frames_(params);
     } catch (const std::bad_alloc&) {
         return makeError(
             Errc::OutOfMemory,

@@ -113,7 +113,7 @@ private:
     void waitForWork(std::unique_lock<std::mutex>& lock);
     void step(Action action);
     void renderFrame();
-    [[nodiscard]] Result<PresentFrame> callProvider(const PresentFrameInfo& info);
+    [[nodiscard]] Result<PresentFrame> callProvider(const PresentFrameParams& params);
     [[nodiscard]] Result<void> checkImage(const std::shared_ptr<GpuImage>& image);
     [[nodiscard]] VkOutcome acquire(std::uint32_t& index);
     void startFrame(PresentFrame frame, std::uint32_t index) noexcept;
@@ -145,6 +145,7 @@ private:
     // vk-bootstrap surface helpers), and they return the C handle.
     VkSurfaceKHR surface_ = VK_NULL_HANDLE;
     VkSurfaceFormatKHR format_{};
+    PresentEncoding encoding_ = PresentEncoding::Linear;  // presentEncoding(format_.format)
     vk::Fence fence_;
     bool fence_leaked_ = false;  // the 5 s cap of design M1b §5.2 step 4 passed: never destroyed
     vk::SwapchainKHR swapchain_;

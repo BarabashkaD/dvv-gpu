@@ -3,10 +3,15 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
+
+#include <vulkan/vulkan_core.h>
 
 #include "dvv/base/error.h"
 #include "dvv/base/lifetime.h"
@@ -16,9 +21,12 @@
 #include "dvv/gpu/presenter.h"
 #include "dvv/platform/native_window.h"
 #include "dvv/platform/testing/test_window.h"
+#include "present_blit.h"
 #include "present_fixture.h"
 
 namespace dvv::gpu::test {
+
+static_assert(std::is_same_v<PresentFrameInfo, PresentFrameParams>);
 
 namespace {
 
@@ -49,6 +57,61 @@ TEST_CASE_FIXTURE(PresentTest, "a presenter presents frames at the window's size
     CHECK_FALSE(presenter->failure());
     CHECK(errors().size() == 0);
     CHECK(control().calls.load() >= 3);
+}
+
+TEST_CASE_FIXTURE(PresentTest, "the per-call encoding matches the swapchain format") {
+    struct Record {
+        VkFormat format = VK_FORMAT_UNDEFINED;
+        PresentEncoding encoding = PresentEncoding::Linear;
+    };
+    // The provider runs on the presenter thread, the checks on the test thread.
+    std::mutex mutex;
+    std::vector<Record> records;
+    PresenterOptions recording = options();
+    recording.frames = [&mutex, &records, frames = std::move(recording.frames)](
+                           const PresentFrameParams& params) mutable -> Result<PresentFrame> {
+        {
+            const std::lock_guard lock(mutex);
+            records.push_back({.format = params.format, .encoding = params.encoding});
+        }
+        return frames(params);
+    };
+    auto presenter = context().createPresenter(std::move(recording));
+    REQUIRE(presenter.has_value());
+    if (!presenter) {
+        return;
+    }
+    REQUIRE(pumpUntil(window(), [&] {
+        (*presenter)->requestFrame();
+        return (*presenter)->stats().framesPresented >= 3;
+    }));
+    presenter->reset();  // no provider call after this
+    const std::lock_guard lock(mutex);
+    REQUIRE(records.size() >= 3);
+    for (const Record& record : records) {
+        CAPTURE(static_cast<int>(record.format));
+        CHECK(record.format != VK_FORMAT_UNDEFINED);
+        CHECK(record.encoding == detail::presentEncoding(record.format));
+    }
+    CHECK(errors().size() == 0);
+}
+
+TEST_CASE("PresentFrameParams builds with and without encoding") {
+    // clang 19 (the Linux CI image) and Apple clang of Xcode 27 do not warn about an omitted
+    // designated field that has a default member initialiser.
+    const PresentFrameParams with_encoding{.extent = {},
+                                           .frameNumber = 0,
+                                           .previousFrameCompleted = false,
+                                           .encoding = PresentEncoding::Srgb};
+    CHECK(with_encoding.encoding == PresentEncoding::Srgb);
+    CHECK(with_encoding.format == VK_FORMAT_UNDEFINED);
+    const PresentFrameInfo old_designated{.extent = {},
+                                          .format = VK_FORMAT_B8G8R8A8_UNORM,
+                                          .frameNumber = 0,
+                                          .previousFrameCompleted = false};
+    CHECK(old_designated.encoding == PresentEncoding::Linear);
+    const PresentFrameInfo old_positional{{}, VK_FORMAT_UNDEFINED, 0, false};
+    CHECK(old_positional.encoding == PresentEncoding::Linear);
 }
 
 // Design M1b §8.2 case 6: an unusable image skips the frame without failing the presenter. The

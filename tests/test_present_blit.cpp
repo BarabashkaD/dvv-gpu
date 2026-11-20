@@ -1,12 +1,18 @@
 #include <doctest/doctest.h>
 
+#include <string>
+
 #include <vulkan/vulkan_core.h>
 
+#include "dvv/gpu/presenter.h"
 #include "present_blit.h"
+#include "vk.h"
 
+using dvv::gpu::PresentEncoding;
 using dvv::gpu::detail::presentBlitDestination;
 using dvv::gpu::detail::presentBlitFilter;
 using dvv::gpu::detail::presentBlitSource;
+using dvv::gpu::detail::presentEncoding;
 
 TEST_CASE("the blit filter is NEAREST for 1:1 and LINEAR only for scaling with linear filtering") {
     constexpr VkFormatFeatureFlags2 LINEAR = VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
@@ -51,4 +57,31 @@ TEST_CASE("presentBlitDestination accepts UNORM and SRGB formats with BLIT_DST o
         CHECK_FALSE(presentBlitDestination(format, D));
     }
     CHECK_FALSE(presentBlitDestination(VK_FORMAT_B8G8R8A8_UNORM, 0));
+}
+
+TEST_CASE("presentEncoding is Srgb exactly for SRGB formats") {
+    for (const VkFormat format :
+         {VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_A8B8G8R8_SRGB_PACK32}) {
+        CAPTURE(static_cast<int>(format));
+        CHECK(presentEncoding(format) == PresentEncoding::Srgb);
+    }
+    for (const VkFormat format :
+         {VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_A2B10G10R10_UNORM_PACK32}) {
+        CAPTURE(static_cast<int>(format));
+        CHECK(presentEncoding(format) == PresentEncoding::Linear);
+    }
+    // Checked against the format's name, not the traits rule: for every format the present blit
+    // can write, Srgb exactly when the name says Srgb.
+    constexpr VkFormatFeatureFlags2 D = VK_FORMAT_FEATURE_2_BLIT_DST_BIT;
+    for (const VkFormat format :
+         {VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_A8B8G8R8_SRGB_PACK32,
+          VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_A2B10G10R10_UNORM_PACK32}) {
+        if (!presentBlitDestination(format, D)) {
+            continue;
+        }
+        const std::string name = vk::to_string(static_cast<vk::Format>(format));
+        CAPTURE(name);
+        CHECK((presentEncoding(format) == PresentEncoding::Srgb) ==
+              (name.find("Srgb") != std::string::npos));
+    }
 }

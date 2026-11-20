@@ -41,7 +41,7 @@ FrameProvider testFrameProvider(std::shared_ptr<ExecutionContext> context,
     return [context = std::move(context), control = std::move(control),
             buffer = std::shared_ptr<GpuBuffer>{}, image = std::shared_ptr<GpuImage>{},
             extent = platform::PixelSize{}](
-               const PresentFrameInfo& info) mutable -> Result<PresentFrame> {
+               const PresentFrameParams& info) mutable -> Result<PresentFrame> {
         control->calls.fetch_add(1);
         if (control->failNext.exchange(false)) {
             return makeError(Errc::Io, "injected provider failure");
