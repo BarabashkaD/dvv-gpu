@@ -6,11 +6,13 @@ set(dvv_gpu_VERSION_STRING "${PROJECT_VERSION}")
 # dvv-build provides the shared CMake modules and the dependency check (dvv-deps.txt); the dvv
 # presets set DVV_BUILD_CMAKE_DIR to its cmake folder.
 if(NOT DVV_BUILD_CMAKE_DIR OR NOT IS_ABSOLUTE "${DVV_BUILD_CMAKE_DIR}"
-   OR NOT EXISTS "${DVV_BUILD_CMAKE_DIR}/DvvDeps.cmake")
+   OR NOT EXISTS "${DVV_BUILD_CMAKE_DIR}/DvvDeps.cmake"
+   OR NOT EXISTS "${DVV_BUILD_CMAKE_DIR}/DvvOsSources.cmake")
     message(FATAL_ERROR "dvv_gpu: DVV_BUILD_CMAKE_DIR is not set, not absolute or "
-                        "has no DvvDeps.cmake (it must be dvv-build's cmake folder); configure "
-                        "with a dvv-build preset (e.g. `cmake --preset vs2026`, see README.md) "
-                        "or pass -DDVV_BUILD_CMAKE_DIR=<absolute path of dvv-build>/cmake")
+                        "has no DvvDeps.cmake or DvvOsSources.cmake (it must be dvv-build's cmake "
+                        "folder); configure with a dvv-build preset (e.g. `cmake --preset vs2026`, "
+                        "see README.md) or pass "
+                        "-DDVV_BUILD_CMAKE_DIR=<absolute path of dvv-build>/cmake")
 endif()
 include("${DVV_BUILD_CMAKE_DIR}/DvvDeps.cmake")
 # Adds dvv-base and dvv-platform (native windows, run-time libraries; dvv-deps.txt) and checks
@@ -84,10 +86,8 @@ target_link_libraries(dvv_gpu
     PRIVATE $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>)
 dvv_set_compiler_options(dvv_gpu)
 include("${DVV_BUILD_CMAKE_DIR}/DvvOsSources.cmake")  # checked to exist at the top of the file
-dvv_os_sources(dvv_gpu src/surface_vulkan)
+dvv_os_sources(dvv_gpu src/loader src/surface_vulkan src/thread_wait)
 if(WIN32)
-    # The presenter's stop waits while dispatching sent messages on Windows (design M1b §5.5, R15).
-    target_sources(dvv_gpu PRIVATE src/thread_wait_win32.cpp)
     target_link_libraries(dvv_gpu PRIVATE user32)
 elseif(NOT APPLE)
     # Only the headers (Display, Window for VkXlibSurfaceCreateInfoKHR); nothing calls Xlib here.

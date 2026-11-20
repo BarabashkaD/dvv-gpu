@@ -233,12 +233,9 @@ void PresenterCore::stop() noexcept {
         requests_.stop = true;
     }
     wake_.notify_all();
-#if defined(_WIN32)
     // R15: the presenter thread may be inside vkAcquireNextImageKHR or vkQueuePresentKHR, waiting
     // for a message that the WSI sends to this thread (the window's thread).
-    waitForThreadDispatchingSentMessages(thread_.native_handle());
-#endif
-    thread_.join();
+    joinDispatchingSentMessages(thread_);
 }
 
 void PresenterCore::resize(platform::PixelSize extent) noexcept {
