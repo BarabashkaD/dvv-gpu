@@ -14,7 +14,7 @@
 #include "dvv/base/error.h"
 #include "dvv/base/lifetime.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/resources.h"
 #include "gpu_fixture.h"
 
@@ -182,8 +182,8 @@ TEST_CASE_FIXTURE(GpuTest, "a retired resource waits for the submission that may
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a resource keeps the device after its context is gone") {
-    auto own = dvv::gpu::GpuRegistry::create().value();
-    const std::weak_ptr<dvv::gpu::GpuRegistry> watch = own;
+    auto own = dvv::gpu::GpuInstance::create().value();
+    const std::weak_ptr<dvv::gpu::GpuInstance> watch = own;
     std::shared_ptr<dvv::gpu::ExecutionContext> ctx = own->createContext(device()).value();
     auto buffer = ctx->createBuffer({.size = 1024,
                                      .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -191,13 +191,13 @@ TEST_CASE_FIXTURE(GpuTest, "a resource keeps the device after its context is gon
                       .value();
     own.reset();
     ctx.reset();
-    // Still usable: the buffer keeps the device, and the device keeps the registry.
+    // Still usable: the buffer keeps the device, and the device keeps the GPU instance.
     CHECK_FALSE(watch.expired());
     std::ranges::fill(buffer->mapped(), std::byte{0x5a});
     CHECK(buffer->flush().has_value());
     auto kept = watch.lock();
     REQUIRE(kept);
-    buffer.reset();  // frees the buffer, then the device; `kept` holds the registry
+    buffer.reset();  // frees the buffer, then the device; `kept` holds the GPU instance
     // Counted after the device is gone, so what destroying it reported counts too.
     CHECK(kept->validationMessageCount() == 0);
     CHECK(kept.use_count() == 1);

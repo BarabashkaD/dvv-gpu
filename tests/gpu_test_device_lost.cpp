@@ -154,8 +154,9 @@ TEST_CASE_FIXTURE(GpuTest,
         CAPTURE(round);
         const TemporaryDirectory dir;
         const std::filesystem::path file = dir.path() / "cache.bin";
-        auto ctx =
-            registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
+        auto ctx = gpuInstance()
+                       .createContext(device(), ContextOptions{.pipelineCacheFile = file})
+                       .value();
         // A new pipeline changes the cache, so a healthy context would save it.
         REQUIRE(ctx->createComputePipeline(test_shaders::addOne(), ADD_ONE_PUSH_SIZE).has_value());
         REQUIRE(dvv::syncWait(submitTask(*ctx, executor(), {})).has_value());

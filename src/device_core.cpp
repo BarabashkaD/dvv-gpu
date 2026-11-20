@@ -16,10 +16,9 @@
 
 namespace dvv::gpu::detail {
 
-Result<std::shared_ptr<DeviceCore>> DeviceCore::create(std::shared_ptr<const GpuRegistry> registry,
-                                                       const InstanceCore& instance,
-                                                       const PhysicalDevice& physical,
-                                                       const GpuInfo& info, bool presentation) {
+Result<std::shared_ptr<DeviceCore>> DeviceCore::create(
+    std::shared_ptr<const GpuInstance> gpu_instance, const InstanceCore& instance,
+    const PhysicalDevice& physical, const GpuInfo& info, bool presentation) {
     if (!info.usable() || !physical.universalQueueFamily) {
         return makeError(
             Errc::Unsupported,
@@ -28,7 +27,7 @@ Result<std::shared_ptr<DeviceCore>> DeviceCore::create(std::shared_ptr<const Gpu
     DVV_TRY(const std::vector<const char*> extensions, deviceExtensions(info, presentation));
     // Every member is set step by step; the destructor releases whatever exists when a step fails.
     auto core = std::make_shared<DeviceCore>();
-    core->registry_ = std::move(registry);
+    core->gpu_instance_ = std::move(gpu_instance);
     core->id_ = info.id;
     core->info_ = info;
     core->presentation_ = presentation;

@@ -96,14 +96,14 @@ bool pumpUntil(platform::testing::TestWindow& window, const std::function<bool()
 }
 
 PresentTest::PresentTest() {
-    auto registry = GpuRegistry::create({.windowSystem = platform::defaultWindowSystem()});
-    if (!registry) {
-        FAIL(registry.error().describe());
+    auto gpu_instance = GpuInstance::create({.windowSystem = platform::defaultWindowSystem()});
+    if (!gpu_instance) {
+        FAIL(gpu_instance.error().describe());
     }
-    registry_ = std::move(*registry);
-    const auto best = registry_->bestDevice();
+    gpu_instance_ = std::move(*gpu_instance);
+    const auto best = gpu_instance_->bestDevice();
     REQUIRE(best.has_value());
-    auto context = registry_->createContext(best.value_or(DeviceId(0)), {.presentation = true});
+    auto context = gpu_instance_->createContext(best.value_or(DeviceId(0)), {.presentation = true});
     if (!context) {
         FAIL(context.error().describe());
     }
@@ -118,7 +118,7 @@ PresentTest::PresentTest() {
 
 PresentTest::~PresentTest() {
     context_.reset();
-    CHECK(registry_->validationMessageCount() == 0);
+    CHECK(gpu_instance_->validationMessageCount() == 0);
 }
 
 PresenterOptions PresentTest::options() {

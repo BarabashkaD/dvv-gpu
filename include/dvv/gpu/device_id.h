@@ -8,7 +8,7 @@
 
 namespace dvv::gpu {
 
-// A physical device: its index in the GpuRegistry's enumeration (spec §5.2). A strong type, so it
+// A physical device: its index in the GpuInstance's enumeration (spec §5.2). A strong type, so it
 // cannot be mixed up with other integers.
 class DeviceId {
 public:

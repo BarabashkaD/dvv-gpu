@@ -12,7 +12,7 @@
 #include "device_core.h"
 #include "dvv/base/error.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/presenter.h"
 #include "dvv/gpu/resources.h"
 #include "dvv/gpu/testing/fault_injection.h"
@@ -83,9 +83,9 @@ TEST_CASE_FIXTURE(PresentTest,
                   "hang") {
     for (int round = 0; round < 10; ++round) {
         CAPTURE(round);
-        const auto best = registry().bestDevice();
+        const auto best = gpuInstance().bestDevice();
         REQUIRE(best.has_value());
-        auto ctx = registry()
+        auto ctx = gpuInstance()
                        .createContext(best.value_or(dvv::gpu::DeviceId{0}), {.presentation = true})
                        .value();
         const auto control = std::make_shared<ProviderControl>();
@@ -128,9 +128,9 @@ TEST_CASE_FIXTURE(PresentTest,
 TEST_CASE_FIXTURE(PresentTest, "a provider error on a lost context fails the presenter once") {
     for (const bool provider_allocates : {true, false}) {
         CAPTURE(provider_allocates);
-        const auto best = registry().bestDevice();
+        const auto best = gpuInstance().bestDevice();
         REQUIRE(best.has_value());
-        auto ctx = registry()
+        auto ctx = gpuInstance()
                        .createContext(best.value_or(dvv::gpu::DeviceId{0}), {.presentation = true})
                        .value();
         const auto control = std::make_shared<ProviderControl>();
@@ -176,9 +176,9 @@ TEST_CASE_FIXTURE(PresentTest, "a provider error on a lost context fails the pre
 TEST_CASE_FIXTURE(PresentTest, "a device loss seen only by the presenter marks the context lost") {
     for (const bool in_present : {true, false}) {
         CAPTURE(in_present);
-        const auto best = registry().bestDevice();
+        const auto best = gpuInstance().bestDevice();
         REQUIRE(best.has_value());
-        auto ctx = registry()
+        auto ctx = gpuInstance()
                        .createContext(best.value_or(dvv::gpu::DeviceId{0}), {.presentation = true})
                        .value();
         auto& api = mutableDispatch(*ctx);

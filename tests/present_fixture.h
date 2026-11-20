@@ -1,6 +1,6 @@
 #pragma once
 
-// The fixture of the presentation tests (design M1b §8.2): a registry for the build's window
+// The fixture of the presentation tests (design M1b §8.2): a GPU instance for the build's window
 // system, a context with presentation, a native test window and a frame provider the tests steer.
 
 #include <atomic>
@@ -15,7 +15,7 @@
 
 #include "dvv/base/error.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/presenter.h"
 #include "dvv/platform/testing/test_window.h"
 
@@ -58,7 +58,7 @@ private:
 
 // Base of the presentation tests (TEST_CASE_FIXTURE). Presenters are locals of the test body, so
 // they are destroyed before the fixture: the context first, then the validation count is checked,
-// then the window and the registry go.
+// then the window and the GPU instance go.
 class PresentTest {
 public:
     PresentTest();
@@ -68,7 +68,7 @@ public:
     PresentTest& operator=(PresentTest&&) = delete;
     ~PresentTest();
 
-    [[nodiscard]] GpuRegistry& registry() const noexcept { return *registry_; }
+    [[nodiscard]] GpuInstance& gpuInstance() const noexcept { return *gpu_instance_; }
     [[nodiscard]] ExecutionContext& context() const noexcept { return *context_; }
     [[nodiscard]] const std::shared_ptr<ExecutionContext>& contextPointer() const noexcept {
         return context_;
@@ -83,7 +83,7 @@ public:
     [[nodiscard]] std::unique_ptr<Presenter> makePresenter();
 
 private:
-    std::shared_ptr<GpuRegistry> registry_;
+    std::shared_ptr<GpuInstance> gpu_instance_;
     std::shared_ptr<ExecutionContext> context_;
     std::optional<platform::testing::TestWindow> window_;
     std::shared_ptr<ProviderControl> control_ = std::make_shared<ProviderControl>();

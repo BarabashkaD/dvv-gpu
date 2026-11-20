@@ -12,6 +12,7 @@
 #include "dvv/gpu/compute_pipeline.h"
 #include "dvv/gpu/device_id.h"
 #include "dvv/gpu/embedded_shader.h"
+#include "dvv/gpu/gpu_fwd.h"
 #include "dvv/gpu/gpu_info.h"
 #include "dvv/gpu/presenter.h"
 #include "dvv/gpu/resource_pool.h"
@@ -20,8 +21,6 @@
 
 namespace dvv::gpu {
 
-class GpuRegistry;
-
 namespace detail {
 class DeviceCore;
 class PipelineCache;
@@ -29,7 +28,7 @@ class Submitter;
 struct Access;
 }  // namespace detail
 
-// Settings for GpuRegistry::createContext().
+// Settings for GpuInstance::createContext().
 struct ContextOptions {
     // The on-disk pipeline cache (spec §5.2), e.g. defaultPipelineCacheFile(); empty: in memory
     // only. A file written for another device or driver build, or one whose header or data is
@@ -37,8 +36,8 @@ struct ContextOptions {
     // savePipelineCache() and when the context closes (only when it changed). Each save replaces
     // the whole file, so contexts or processes sharing one file are last-writer-wins.
     std::filesystem::path pipelineCacheFile{};
-    // Enables VK_KHR_swapchain. Errc::Internal when the registry has no window system
-    // (GpuRegistryOptions::windowSystem); Errc::Unsupported when the device lacks the extension
+    // Enables VK_KHR_swapchain. Errc::Internal when the GPU instance has no window system
+    // (GpuInstanceOptions::windowSystem); Errc::Unsupported when the device lacks the extension
     // (GpuInfo::optional.swapchain).
     bool presentation = false;
 };
@@ -58,8 +57,8 @@ struct RetireStats {
 // One Vulkan device and everything that works on it (spec §5.2): the device with the required
 // features, one universal queue (graphics, compute and transfer; access serialised by a mutex),
 // the VMA allocator, the timeline semaphore, the retire queue, and the submit and waiter threads.
-// Components reach the GPU only through a context. Created by GpuRegistry::createContext(); keeps
-// its registry alive. Thread-safe: every member may be called from any thread.
+// Components reach the GPU only through a context. Created by GpuInstance::createContext(); keeps
+// its GPU instance alive. Thread-safe: every member may be called from any thread.
 //
 // Blocking work runs on the thread that releases the last reference: the context's destructor
 // writes the pipeline-cache file and waits until the device is idle, and the destructors of
@@ -69,7 +68,7 @@ struct RetireStats {
 class ExecutionContext final : public Managed<ExecutionContext>,
                                public std::enable_shared_from_this<ExecutionContext> {
 public:
-    ExecutionContext(CreationKey<GpuRegistry> key, std::shared_ptr<GpuRegistry> registry,
+    ExecutionContext(CreationKey<GpuInstance> key, std::shared_ptr<GpuInstance> gpu_instance,
                      std::shared_ptr<detail::DeviceCore> core,
                      std::unique_ptr<detail::PipelineCache> pipeline_cache,
                      std::unique_ptr<detail::Submitter> submitter) noexcept;
@@ -82,8 +81,12 @@ public:
     // hangs.
     ~ExecutionContext();
 
-    [[nodiscard]] const std::shared_ptr<GpuRegistry>& registry() const noexcept {
+    [[nodiscard]] const std::shared_ptr<GpuInstance>& gpuInstance() const noexcept {
         return registry_;
+    }
+    // Deprecated (0.3.0): use gpuInstance(); removed in 1.0.0.
+    [[nodiscard]] const std::shared_ptr<GpuInstance>& registry() const noexcept {
+        return gpuInstance();
     }
     [[nodiscard]] DeviceId deviceId() const noexcept;
     // Device generation (spec §5.2); FIRST_GENERATION until device-lost recovery exists.
@@ -166,7 +169,7 @@ private:
     friend struct detail::Access;
     friend class SubmitOperation;
 
-    std::shared_ptr<GpuRegistry> registry_;
+    std::shared_ptr<GpuInstance> registry_;
     std::shared_ptr<detail::DeviceCore> core_;
     std::unique_ptr<detail::PipelineCache> pipeline_cache_;
     std::unique_ptr<detail::Submitter> submitter_;

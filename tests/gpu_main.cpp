@@ -17,7 +17,7 @@
 #include "dvv/base/leak_check.h"
 #include "dvv/base/lifetime.h"
 #include "dvv/base/log.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 
 namespace {
 
@@ -27,15 +27,15 @@ constexpr int EXIT_SKIPPED = 77;
 // loader or no usable Vulkan 1.4 device (Errc::Unsupported), an error for any other failure.
 // Validation is off for this probe; the tests themselves validate.
 dvv::Result<std::optional<std::string>> missingGpu() {
-    const auto registry =
-        dvv::gpu::GpuRegistry::create({.validation = dvv::gpu::ValidationMode::Off});
-    if (!registry) {
-        if (registry.error().code != dvv::Errc::Unsupported) {
-            return std::unexpected(registry.error());
+    const auto gpu_instance =
+        dvv::gpu::GpuInstance::create({.validation = dvv::gpu::ValidationMode::Off});
+    if (!gpu_instance) {
+        if (gpu_instance.error().code != dvv::Errc::Unsupported) {
+            return std::unexpected(gpu_instance.error());
         }
-        return registry.error().describe();
+        return gpu_instance.error().describe();
     }
-    if (!(*registry)->bestDevice()) {
+    if (!(*gpu_instance)->bestDevice()) {
         return "no Vulkan 1.4 device meets the requirements";
     }
     return std::nullopt;

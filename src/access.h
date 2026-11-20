@@ -8,7 +8,7 @@
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/compute_pipeline.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/resources.h"
 #include "instance.h"
 #include "pipeline_cache.h"
@@ -17,8 +17,8 @@
 namespace dvv::gpu::detail {
 
 struct Access {
-    [[nodiscard]] static InstanceCore& instance(const GpuRegistry& registry) noexcept {
-        return *registry.instance_;
+    [[nodiscard]] static InstanceCore& instance(const GpuInstance& gpu_instance) noexcept {
+        return *gpu_instance.instance_;
     }
     [[nodiscard]] static DeviceCore& core(const ExecutionContext& context) noexcept {
         return *context.core_;

@@ -66,7 +66,7 @@ private:
 class PresenterCore {
 public:
     // Allocates only; no Vulkan object exists yet. `context` and `instance` outlive the core: the
-    // Presenter holds the context, which holds the registry and its instance.
+    // Presenter holds the context, which holds the GPU instance.
     PresenterCore(ExecutionContext& context, std::shared_ptr<DeviceCore> device,
                   const InstanceCore& instance, PresenterOptions options);
     PresenterCore(const PresenterCore&) = delete;

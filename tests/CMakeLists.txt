@@ -11,8 +11,10 @@ add_executable(dvv_gpu_tests
     main.cpp
     test_device_id.cpp
     test_free_list.cpp
+    test_gpu_fwd.cpp
     test_gpu_info.cpp
     test_loader.cpp
+    test_neutral_headers.cpp
     test_pipeline_cache.cpp
     test_present_blit.cpp
     test_presenter_core.cpp
@@ -164,8 +166,8 @@ if(NOT DVV_SANITIZE)
 endif()
 
 # Compile-fail tests (spec §9.4), run by dvv-base's shared runner. Case 0 is the control and must
-# build; cases 1-8 must fail to compile with the expected diagnostic: a forged registry key, and a
-# registry, a context, a buffer, an image, a resource pool, a compute pipeline or a presenter
+# build; cases 1-8 must fail to compile with the expected diagnostic: a forged GPU instance key, and
+# a GPU instance, a context, a buffer, an image, a resource pool, a compute pipeline or a presenter
 # constructed without a key.
 set(compile_fail_source ${CMAKE_CURRENT_SOURCE_DIR}/compile_fail/direct_construction.cpp)
 add_executable(dvv_gpu_compile_ok ${compile_fail_source})

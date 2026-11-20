@@ -9,7 +9,7 @@
 
 #include "access.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "presenter_core.h"
 
 namespace dvv::gpu {

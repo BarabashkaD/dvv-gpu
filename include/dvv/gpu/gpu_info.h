@@ -25,7 +25,7 @@ struct OptionalFeatures {
     bool swapchain = false;     // VK_KHR_swapchain (device extension; ContextOptions::presentation)
 };
 
-// One physical device as the GpuRegistry found it.
+// One physical device as the GpuInstance found it.
 struct GpuInfo {
     DeviceId id{0};
     std::string name{};

@@ -1,6 +1,6 @@
 #pragma once
 
-// The Vulkan instance behind a GpuRegistry: validation settings, the instance and its dispatcher,
+// The Vulkan instance behind a GpuInstance: validation settings, the instance and its dispatcher,
 // and the debug messenger that counts and logs messages.
 
 #include <atomic>
@@ -17,7 +17,7 @@
 #include "devices.h"
 #include "dvv/base/error.h"
 #include "dvv/base/log.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/platform/native_window.h"
 #include "vk.h"
 
@@ -25,7 +25,7 @@ namespace dvv::gpu::detail {
 
 inline constexpr char VALIDATION_LAYER[] = "VK_LAYER_KHRONOS_validation";
 
-// What GpuRegistry::create was asked for, before the layer's presence is known.
+// What GpuInstance::create was asked for, before the layer's presence is known.
 struct ValidationRequest {
     ValidationMode mode = ValidationMode::Off;
     bool required = false;
@@ -38,7 +38,7 @@ struct ValidationRequest {
 // The options win; unset options fall back to the environment values (nullopt or empty = unset),
 // then to the default (On in Debug builds, Off in Release builds; not required).
 [[nodiscard]] Result<ValidationRequest> resolveValidation(
-    const GpuRegistryOptions& options, const std::optional<std::string>& environment_mode,
+    const GpuInstanceOptions& options, const std::optional<std::string>& environment_mode,
     const std::optional<std::string>& environment_required, bool debug_build);
 
 // The mode to enable: the requested one when the layer is installed (in version 1.4 or newer);
@@ -61,10 +61,10 @@ struct ValidationRequest {
                                              vk::DebugUtilsMessageTypeFlagsEXT types,
                                              std::string_view id_name, std::string_view message);
 
-// The instance extensions the registry's window system needs: none for a headless registry,
+// The instance extensions the GPU instance's window system needs: none for a headless one,
 // otherwise platform::surfaceInstanceExtensions(*options.windowSystem).
 [[nodiscard]] std::span<const char* const> windowSystemExtensions(
-    const GpuRegistryOptions& options) noexcept;
+    const GpuInstanceOptions& options) noexcept;
 
 // Errc::Unsupported "the Vulkan loader does not offer <extension>, which the <name> window system
 // needs" for the first required extension that is not available.
@@ -92,13 +92,13 @@ struct ValidationRequest {
 [[nodiscard]] bool retryWithoutValidation(bool create_instance_failed, VkResult result,
                                           ValidationMode validation, bool required) noexcept;
 
-// Implementation part of GpuRegistry (exempt from spec §9.4 registration: owned only by its
-// registry, with the same lifetime). Created only by create(); the public default constructor
+// Implementation part of GpuInstance (exempt from spec §9.4 registration: owned only by its
+// GPU instance, with the same lifetime). Created only by create(); the public default constructor
 // serves create() and white-box tests.
 class InstanceCore {
 public:
     [[nodiscard]] static Result<std::unique_ptr<InstanceCore>> create(
-        const GpuRegistryOptions& options);
+        const GpuInstanceOptions& options);
 
     InstanceCore() = default;
     InstanceCore(const InstanceCore&) = delete;

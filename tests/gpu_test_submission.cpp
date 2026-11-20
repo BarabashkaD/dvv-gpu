@@ -275,7 +275,7 @@ TEST_CASE_FIXTURE(GpuTest, "a command that cannot be recorded fails the submissi
           "fillBuffer: offset 2 and size 8 must be multiples of 4, the size not 0");
 
     // A buffer of another context (another device as far as the recorder is concerned).
-    auto other = registry().createContext(device()).value();
+    auto other = gpuInstance().createContext(device()).value();
     auto foreign = other->createBuffer({.size = 64, .usage = TRANSFER, .name = "foreign"}).value();
     const auto device_check =
         submitAndWait([&](CommandRecorder& recorder) { recorder.copyBuffer(*foreign, *small); });
@@ -318,7 +318,7 @@ TEST_CASE_FIXTURE(GpuTest, "raw commands get the command buffer after the automa
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a context released during a submission closes on the executor") {
-    auto ctx = registry().createContext(device()).value();
+    auto ctx = gpuInstance().createContext(device()).value();
     const std::weak_ptr<dvv::gpu::ExecutionContext> watch = ctx;
     auto buffer = ctx->createBuffer({.size = 64,
                                      .usage = TRANSFER,

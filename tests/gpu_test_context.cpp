@@ -9,7 +9,7 @@
 #include "dvv/base/error.h"
 #include "dvv/base/lifetime.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/platform/native_window.h"
 #include "gpu_fixture.h"
 
@@ -39,9 +39,9 @@ TEST_CASE_FIXTURE(GpuTest, "a context runs on the chosen device in its first gen
     ExecutionContext& ctx = context();
     CHECK(ctx.deviceId() == device());
     CHECK(ctx.generation() == dvv::gpu::FIRST_GENERATION);
-    CHECK(ctx.deviceInfo().name == registry().devices()[device().index()].name);
-    CHECK(ctx.registry().get() == &registry());
-    CHECK(ctx.ownerId() == registry().objectId());
+    CHECK(ctx.deviceInfo().name == gpuInstance().devices()[device().index()].name);
+    CHECK(ctx.gpuInstance().get() == &gpuInstance());
+    CHECK(ctx.ownerId() == gpuInstance().objectId());
     CHECK(ctx.typeName() == "dvv::gpu::ExecutionContext");
 
     const auto stats = ctx.retireStats();
@@ -51,24 +51,28 @@ TEST_CASE_FIXTURE(GpuTest, "a context runs on the chosen device in its first gen
     CHECK(ctx.drain().has_value());
 }
 
+TEST_CASE_FIXTURE(GpuTest, "registry() and gpuInstance() name the same instance (0.3.x)") {
+    CHECK(context().registry().get() == context().gpuInstance().get());
+}
+
 TEST_CASE_FIXTURE(GpuTest, "createContext rejects a device that does not exist") {
-    const auto missing =
-        registry().createContext(DeviceId(static_cast<std::uint32_t>(registry().devices().size())));
+    const auto missing = gpuInstance().createContext(
+        DeviceId(static_cast<std::uint32_t>(gpuInstance().devices().size())));
     REQUIRE_FALSE(missing.has_value());
     CHECK(missing.error().code == dvv::Errc::Internal);
 }
 
 TEST_CASE("a presentation context enables VK_KHR_swapchain") {
-    const auto registry =
-        dvv::gpu::GpuRegistry::create({.windowSystem = dvv::platform::defaultWindowSystem()});
-    if (!registry) {
-        FAIL(registry.error().describe());
+    const auto gpu_instance =
+        dvv::gpu::GpuInstance::create({.windowSystem = dvv::platform::defaultWindowSystem()});
+    if (!gpu_instance) {
+        FAIL(gpu_instance.error().describe());
     }
-    const auto best_device = (*registry)->bestDevice();
+    const auto best_device = (*gpu_instance)->bestDevice();
     REQUIRE(best_device.has_value());
     const DeviceId best = best_device.value_or(DeviceId(0));
     {
-        const auto presenting = (*registry)->createContext(best, {.presentation = true});
+        const auto presenting = (*gpu_instance)->createContext(best, {.presentation = true});
         if (!presenting) {
             FAIL(presenting.error().describe());
         }
@@ -76,29 +80,29 @@ TEST_CASE("a presentation context enables VK_KHR_swapchain") {
         CHECK(Access::core(**presenting).dispatch().vkCreateSwapchainKHR != nullptr);
     }
     {
-        const auto plain = (*registry)->createContext(best);
+        const auto plain = (*gpu_instance)->createContext(best);
         if (!plain) {
             FAIL(plain.error().describe());
         }
         CHECK_FALSE((*plain)->presentation());
         CHECK(Access::core(**plain).dispatch().vkCreateSwapchainKHR == nullptr);
     }
-    CHECK((*registry)->validationMessageCount() == 0);
+    CHECK((*gpu_instance)->validationMessageCount() == 0);
 }
 
-TEST_CASE_FIXTURE(GpuTest, "presentation needs a registry with a window system") {
-    const auto context = registry().createContext(device(), {.presentation = true});
+TEST_CASE_FIXTURE(GpuTest, "presentation needs a GPU instance with a window system") {
+    const auto context = gpuInstance().createContext(device(), {.presentation = true});
     REQUIRE_FALSE(context.has_value());
     CHECK(context.error().code == dvv::Errc::Internal);
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a device that misses requirements gets no device") {
     // White-box: the usable device as if it lacked a required feature.
-    dvv::gpu::GpuInfo info = registry().devices()[device().index()];
+    dvv::gpu::GpuInfo info = gpuInstance().devices()[device().index()];
     info.missingRequirements = {"maintenance6"};
-    const auto& instance = Access::instance(registry());
+    const auto& instance = Access::instance(gpuInstance());
     const auto core =
-        dvv::gpu::detail::DeviceCore::create(registry().shared_from_this(), instance,
+        dvv::gpu::detail::DeviceCore::create(gpuInstance().shared_from_this(), instance,
                                              instance.physicalDevices()[device().index()], info);
     REQUIRE_FALSE(core.has_value());
     CHECK(core.error().code == dvv::Errc::Unsupported);
@@ -160,19 +164,20 @@ TEST_CASE_FIXTURE(GpuTest, "drain frees everything retired after waiting for the
     CHECK(context().retireStats().freed == 1);
 }
 
-TEST_CASE("a context keeps its registry alive") {
-    auto registry = dvv::gpu::GpuRegistry::create().value();
-    const dvv::ObjectId registry_id = registry->objectId();
+TEST_CASE("a context keeps its GPU instance alive") {
+    auto gpu_instance = dvv::gpu::GpuInstance::create().value();
+    const dvv::ObjectId gpu_instance_id = gpu_instance->objectId();
     std::shared_ptr<ExecutionContext> ctx =
-        registry->createContext(registry->rankedDevices().front()).value();  // main() checked it
-    const std::weak_ptr<dvv::gpu::GpuRegistry> watch = registry;
-    registry.reset();
+        gpu_instance->createContext(gpu_instance->rankedDevices().front())
+            .value();  // main() checked it
+    const std::weak_ptr<dvv::gpu::GpuInstance> watch = gpu_instance;
+    gpu_instance.reset();
     CHECK_FALSE(watch.expired());
-    CHECK(ctx->registry()->objectId() == registry_id);
+    CHECK(ctx->gpuInstance()->objectId() == gpu_instance_id);
     CHECK(ctx->drain().has_value());
     auto kept = watch.lock();
     REQUIRE(kept);
-    ctx.reset();  // destroys the device; `kept` holds the registry
+    ctx.reset();  // destroys the device; `kept` holds the GPU instance
     // Counted after the device is gone, so what destroying it reported counts too.
     CHECK(kept->validationMessageCount() == 0);
     CHECK(kept.use_count() == 1);

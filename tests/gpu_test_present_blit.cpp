@@ -17,7 +17,7 @@
 #include "dvv/base/executors.h"
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/resources.h"
 #include "dvv/platform/native_window.h"
 #include "gpu_fixture.h"
@@ -25,7 +25,7 @@
 using dvv::gpu::CommandRecorder;
 using dvv::gpu::ExecutionContext;
 using dvv::gpu::GpuImage;
-using dvv::gpu::GpuRegistry;
+using dvv::gpu::GpuInstance;
 using dvv::gpu::MemoryUsage;
 using dvv::gpu::detail::Access;
 
@@ -33,17 +33,18 @@ namespace {
 
 constexpr std::uint32_t RGBA = 4;
 
-// A registry with the platform's window system and a presentation context on the best device;
+// A GPU instance with the platform's window system and a presentation context on the best device;
 // validation comes from the environment, as in GpuTest. At the end the context goes first, then
 // no validation message may have been counted.
 class PresentBlitTest {
 public:
     PresentBlitTest() {
-        auto registry = GpuRegistry::create({.windowSystem = dvv::platform::defaultWindowSystem()});
-        if (!registry) {
-            FAIL(registry.error().describe());
+        auto gpu_instance =
+            GpuInstance::create({.windowSystem = dvv::platform::defaultWindowSystem()});
+        if (!gpu_instance) {
+            FAIL(gpu_instance.error().describe());
         }
-        registry_ = std::move(*registry);
+        gpu_instance_ = std::move(*gpu_instance);
         context_ = presentationContext();
         executor_ = dvv::ExecutorFactory::makeThreadPool(1).value();
     }
@@ -54,17 +55,17 @@ public:
     ~PresentBlitTest() {
         context_.reset();
         executor_.reset();
-        CHECK(registry_->validationMessageCount() == 0);
+        CHECK(gpu_instance_->validationMessageCount() == 0);
     }
 
     // Another presentation context on the same device.
     [[nodiscard]] std::shared_ptr<ExecutionContext> presentationContext() {
-        const auto best = registry_->bestDevice();
+        const auto best = gpu_instance_->bestDevice();
         if (!best) {
             FAIL("no usable Vulkan device");
         }
-        auto context =
-            registry_->createContext(best.value_or(dvv::gpu::DeviceId(0)), {.presentation = true});
+        auto context = gpu_instance_->createContext(best.value_or(dvv::gpu::DeviceId(0)),
+                                                    {.presentation = true});
         if (!context) {
             FAIL(context.error().describe());
         }
@@ -80,7 +81,7 @@ public:
     }
 
 private:
-    std::shared_ptr<GpuRegistry> registry_;
+    std::shared_ptr<GpuInstance> gpu_instance_;
     std::shared_ptr<ExecutionContext> context_;
     std::shared_ptr<dvv::ThreadPool> executor_;
 };

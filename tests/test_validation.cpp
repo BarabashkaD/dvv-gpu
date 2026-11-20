@@ -6,12 +6,12 @@
 #include "dvv/base/error.h"
 #include "dvv/base/log.h"
 #include "dvv/gpu/gpu_info.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "instance.h"
 
 using dvv::Errc;
 using dvv::LogLevel;
-using dvv::gpu::GpuRegistryOptions;
+using dvv::gpu::GpuInstanceOptions;
 using dvv::gpu::ValidationMode;
 using dvv::gpu::detail::countsAsFailure;
 using dvv::gpu::detail::debugMessageLevel;
@@ -61,7 +61,7 @@ TEST_CASE("the environment sets validation unless the options do") {
     CHECK(from_environment.explicitlyRequested);
     CHECK_FALSE(resolveValidation({}, "off", "0", true).value().required);
 
-    const GpuRegistryOptions options{.validation = ValidationMode::Off,
+    const GpuInstanceOptions options{.validation = ValidationMode::Off,
                                      .validationRequired = false};
     const auto from_options = resolveValidation(options, "sync", "1", true).value();
     CHECK(from_options.mode == ValidationMode::Off);

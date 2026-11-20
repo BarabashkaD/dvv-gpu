@@ -14,7 +14,7 @@
 #include "dvv/base/json.h"
 #include "dvv/base/log.h"
 #include "dvv/base/paths.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "pipeline_cache.h"
 #include "resource_pool_state.h"
 #include "submitter.h"
@@ -77,13 +77,13 @@ Result<std::vector<std::pair<std::uint32_t, std::uint32_t>>> reflectedDescriptor
 
 }  // namespace
 
-ExecutionContext::ExecutionContext(CreationKey<GpuRegistry> key,
-                                   std::shared_ptr<GpuRegistry> registry,
+ExecutionContext::ExecutionContext(CreationKey<GpuInstance> key,
+                                   std::shared_ptr<GpuInstance> gpu_instance,
                                    std::shared_ptr<detail::DeviceCore> core,
                                    std::unique_ptr<detail::PipelineCache> pipeline_cache,
                                    std::unique_ptr<detail::Submitter> submitter) noexcept
     : Managed(std::move(key)),
-      registry_(std::move(registry)),
+      registry_(std::move(gpu_instance)),
       core_(std::move(core)),
       pipeline_cache_(std::move(pipeline_cache)),
       submitter_(std::move(submitter)) {}

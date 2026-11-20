@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -14,14 +15,14 @@
 #include "dvv/base/environment.h"
 #include "dvv/base/log.h"
 #include "dvv/gpu/gpu_info.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/platform/native_window.h"
 #include "gpu_fixture.h"
 #include "instance.h"
 
 using dvv::gpu::DeviceId;
 using dvv::gpu::GpuInfo;
-using dvv::gpu::GpuRegistry;
+using dvv::gpu::GpuInstance;
 using dvv::gpu::detail::Access;
 using dvv::gpu::test::CapturedLog;
 using dvv::gpu::test::GpuTest;
@@ -67,16 +68,22 @@ constexpr char OTHER_SURFACE_EXTENSION[] = "VK_KHR_win32_surface";
 
 }  // namespace
 
-TEST_CASE_FIXTURE(GpuTest, "the registry finds a usable Vulkan 1.4 device and ranks it first") {
-    CHECK(registry().loaderVersion() >= VK_API_VERSION_1_3);
-    REQUIRE_FALSE(registry().devices().empty());
-    REQUIRE(registry().rankedDevices().size() == registry().devices().size());
-    CHECK(registry().rankedDevices().front() == device());
+// The 0.3.x names are aliases of the declared classes; 1.0.0 flips them.
+namespace dvv::gpu {
+static_assert(std::is_same_v<GpuRegistry, GpuInstance> &&
+              std::is_same_v<GpuRegistryOptions, GpuInstanceOptions>);
+}  // namespace dvv::gpu
 
-    for (std::uint32_t index = 0; index < registry().devices().size(); ++index) {
-        CHECK(registry().devices()[index].id == DeviceId(index));
+TEST_CASE_FIXTURE(GpuTest, "the GPU instance finds a usable Vulkan 1.4 device and ranks it first") {
+    CHECK(gpuInstance().loaderVersion() >= VK_API_VERSION_1_3);
+    REQUIRE_FALSE(gpuInstance().devices().empty());
+    REQUIRE(gpuInstance().rankedDevices().size() == gpuInstance().devices().size());
+    CHECK(gpuInstance().rankedDevices().front() == device());
+
+    for (std::uint32_t index = 0; index < gpuInstance().devices().size(); ++index) {
+        CHECK(gpuInstance().devices()[index].id == DeviceId(index));
     }
-    const GpuInfo& best = registry().devices()[device().index()];
+    const GpuInfo& best = gpuInstance().devices()[device().index()];
     INFO(best.name);
     CHECK(best.usable());
     CHECK(best.apiVersion >= VK_API_VERSION_1_4);
@@ -86,53 +93,53 @@ TEST_CASE_FIXTURE(GpuTest, "the registry finds a usable Vulkan 1.4 device and ra
     CHECK(std::ranges::any_of(best.deviceUuid, [](std::uint8_t byte) { return byte != 0; }));
 }
 
-TEST_CASE_FIXTURE(GpuTest, "the default registry is headless") {
-    CHECK(registry().windowSystem() == std::nullopt);
-    const auto& instance = Access::instance(registry());
+TEST_CASE_FIXTURE(GpuTest, "the default GPU instance is headless") {
+    CHECK(gpuInstance().windowSystem() == std::nullopt);
+    const auto& instance = Access::instance(gpuInstance());
     CHECK(instance.dispatch().vkGetInstanceProcAddr(instance.instance(), "vkDestroySurfaceKHR") ==
           nullptr);
 }
 
-TEST_CASE("a registry with the platform's window system enables the surface extensions") {
+TEST_CASE("a GPU instance with the platform's window system enables the surface extensions") {
     const WindowSystem system = dvv::platform::defaultWindowSystem();
-    const auto registry = GpuRegistry::create({.windowSystem = system});
-    if (!registry) {
-        FAIL(registry.error().describe());
+    const auto gpu_instance = GpuInstance::create({.windowSystem = system});
+    if (!gpu_instance) {
+        FAIL(gpu_instance.error().describe());
     }
-    CHECK((*registry)->windowSystem() == system);
-    const auto& instance = Access::instance(**registry);
+    CHECK((*gpu_instance)->windowSystem() == system);
+    const auto& instance = Access::instance(**gpu_instance);
     const auto get_instance_proc_addr = instance.dispatch().vkGetInstanceProcAddr;
     CHECK(get_instance_proc_addr(instance.instance(), "vkDestroySurfaceKHR") != nullptr);
     CHECK(get_instance_proc_addr(instance.instance(), PLATFORM_SURFACE_FUNCTION) != nullptr);
-    const auto best = (*registry)->bestDevice();
+    const auto best = (*gpu_instance)->bestDevice();
     REQUIRE(best.has_value());
-    CHECK((*registry)->devices()[best.value_or(DeviceId(0)).index()].optional.swapchain);
-    CHECK((*registry)->validationMessageCount() == 0);
+    CHECK((*gpu_instance)->devices()[best.value_or(DeviceId(0)).index()].optional.swapchain);
+    CHECK((*gpu_instance)->validationMessageCount() == 0);
 }
 
 TEST_CASE("a window system the loader lacks is unsupported") {
-    const auto registry = GpuRegistry::create({.windowSystem = OTHER_WINDOW_SYSTEM});
-    REQUIRE_FALSE(registry.has_value());
-    CHECK(registry.error().code == dvv::Errc::Unsupported);
-    CHECK(registry.error().message.find(OTHER_SURFACE_EXTENSION) != std::string::npos);
+    const auto gpu_instance = GpuInstance::create({.windowSystem = OTHER_WINDOW_SYSTEM});
+    REQUIRE_FALSE(gpu_instance.has_value());
+    CHECK(gpu_instance.error().code == dvv::Errc::Unsupported);
+    CHECK(gpu_instance.error().message.find(OTHER_SURFACE_EXTENSION) != std::string::npos);
 }
 
-TEST_CASE_FIXTURE(GpuTest, "the registry validates as DVV_VK_VALIDATION asks") {
+TEST_CASE_FIXTURE(GpuTest, "the GPU instance validates as DVV_VK_VALIDATION asks") {
     const auto requested = dvv::getEnvironment("DVV_VK_VALIDATION");
     if (!requested || requested->empty()) {
         MESSAGE("DVV_VK_VALIDATION is not set");
         return;
     }
     // The test environment points the loader at the prefix's layer, so it is always found.
-    CHECK(dvv::gpu::validationModeName(registry().validation()) == *requested);
+    CHECK(dvv::gpu::validationModeName(gpuInstance().validation()) == *requested);
 }
 
 TEST_CASE("debug messages are counted by the messenger policy and logged") {
     using Severity = vk::DebugUtilsMessageSeverityFlagBitsEXT;
     using Type = vk::DebugUtilsMessageTypeFlagBitsEXT;
 
-    const auto registry = GpuRegistry::create().value();
-    const auto& instance = dvv::gpu::detail::Access::instance(*registry);
+    const auto gpu_instance = GpuInstance::create().value();
+    const auto& instance = dvv::gpu::detail::Access::instance(*gpu_instance);
     REQUIRE(instance.debugUtils());
     const CapturedLog log(dvv::LogLevel::Info);
 
@@ -142,12 +149,12 @@ TEST_CASE("debug messages are counted by the messenger policy and logged") {
         instance.instance().submitDebugUtilsMessageEXT(
             severity, vk::DebugUtilsMessageTypeFlagsEXT(type), data, instance.dispatch());
     };
-    const std::uint64_t before = registry->validationMessageCount();
+    const std::uint64_t before = gpu_instance->validationMessageCount();
     submit(Severity::eError, Type::eGeneral, "counted general error");
     submit(Severity::eWarning, Type::eValidation, "counted validation warning");
     submit(Severity::eWarning, Type::eGeneral, "uncounted general warning");
     submit(Severity::eInfo, Type::eValidation, "uncounted validation info");
-    CHECK(registry->validationMessageCount() - before == 2);
+    CHECK(gpu_instance->validationMessageCount() - before == 2);
     CHECK(log.contains("Vulkan general error [dvv-test]: counted general error"));
     CHECK(log.contains("Vulkan validation warning [dvv-test]: counted validation warning"));
     CHECK(log.contains("Vulkan general warning [dvv-test]: uncounted general warning"));
@@ -156,21 +163,23 @@ TEST_CASE("debug messages are counted by the messenger policy and logged") {
 }
 
 TEST_CASE("a deliberate validation error is counted") {
-    const auto registry = GpuRegistry::create().value();
-    if (registry->validation() == dvv::gpu::ValidationMode::Off) {
+    const auto gpu_instance = GpuInstance::create().value();
+    if (gpu_instance->validation() == dvv::gpu::ValidationMode::Off) {
         MESSAGE("validation is off; nothing to check");
         return;
     }
-    const auto& instance = dvv::gpu::detail::Access::instance(*registry);
+    const auto& instance = dvv::gpu::detail::Access::instance(*gpu_instance);
     const vk::PhysicalDevice physical =
-        instance.physicalDevices().at(registry->bestDevice().value_or(DeviceId(0)).index()).handle;
+        instance.physicalDevices()
+            .at(gpu_instance->bestDevice().value_or(DeviceId(0)).index())
+            .handle;
     const CapturedLog log(dvv::LogLevel::Error);
     // An image usage of 0 is invalid usage (VkPhysicalDeviceImageFormatInfo2::usage must not be 0).
     const vk::PhysicalDeviceImageFormatInfo2 info{.format = vk::Format::eR8G8B8A8Unorm,
                                                   .type = vk::ImageType::e2D,
                                                   .tiling = vk::ImageTiling::eOptimal};
     static_cast<void>(physical.getImageFormatProperties2(info, instance.dispatch()));
-    CHECK(registry->validationMessageCount() > 0);
+    CHECK(gpu_instance->validationMessageCount() > 0);
     CHECK(log.contains("Vulkan validation error"));
 }
 
@@ -193,19 +202,19 @@ TEST_CASE("a validation layer that cannot be loaded turns validation off without
 
     {
         const CapturedLog log(dvv::LogLevel::Warn);
-        const auto registry = GpuRegistry::create(
+        const auto gpu_instance = GpuInstance::create(
             {.validation = dvv::gpu::ValidationMode::On, .validationRequired = false});
-        if (!registry) {
-            FAIL(registry.error().describe());
+        if (!gpu_instance) {
+            FAIL(gpu_instance.error().describe());
         }
-        CHECK((*registry)->validation() == dvv::gpu::ValidationMode::Off);
-        CHECK((*registry)->validationMessageCount() == 0);
+        CHECK((*gpu_instance)->validation() == dvv::gpu::ValidationMode::Off);
+        CHECK((*gpu_instance)->validationMessageCount() == 0);
         // With the loader's result: ErrorLayerNotPresent (Linux) or ErrorOutOfHostMemory (Windows).
         CHECK(log.contains("VK_LAYER_KHRONOS_validation could not be loaded (Error"));
         CHECK(log.contains("); validation is off"));
     }
 
-    const auto required = GpuRegistry::create(
+    const auto required = GpuInstance::create(
         {.validation = dvv::gpu::ValidationMode::On, .validationRequired = true});
     REQUIRE_FALSE(required.has_value());
     CHECK((required.error().code == dvv::Errc::Unsupported ||

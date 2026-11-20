@@ -12,7 +12,7 @@
 #include "dvv/base/lifetime.h"
 #include "dvv/gpu/device_id.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/presenter.h"
 #include "dvv/platform/native_window.h"
 #include "dvv/platform/testing/test_window.h"
@@ -108,9 +108,9 @@ TEST_CASE_FIXTURE(PresentTest,
 // Design M1b §8.2 case 9.
 TEST_CASE_FIXTURE(PresentTest, "wrong configurations are refused with Internal") {
     SUBCASE("a context without presentation") {
-        const auto best = registry().bestDevice();
+        const auto best = gpuInstance().bestDevice();
         REQUIRE(best.has_value());
-        const auto headless_context = registry().createContext(best.value_or(DeviceId(0)), {});
+        const auto headless_context = gpuInstance().createContext(best.value_or(DeviceId(0)), {});
         REQUIRE(headless_context.has_value());
         const auto result = (*headless_context)->createPresenter(options());
         REQUIRE_FALSE(result);
@@ -141,8 +141,8 @@ TEST_CASE_FIXTURE(PresentTest, "wrong configurations are refused with Internal")
         REQUIRE_FALSE(result);
         CHECK(result.error().code == Errc::Internal);
     }
-    SUBCASE("presentation on a headless registry") {
-        const auto headless = GpuRegistry::create({});
+    SUBCASE("presentation on a headless GPU instance") {
+        const auto headless = GpuInstance::create({});
         REQUIRE(headless.has_value());
         const auto best = (*headless)->bestDevice();
         REQUIRE(best.has_value());
@@ -157,11 +157,12 @@ TEST_CASE_FIXTURE(PresentTest, "wrong configurations are refused with Internal")
 // Design M1b §8.2 case 10.
 TEST_CASE("a presenter's objects are gone after it is destroyed") {
     const std::size_t before = LifetimeRegistry::instance().liveCount();
-    auto registry = GpuRegistry::create({.windowSystem = platform::defaultWindowSystem()});
-    REQUIRE(registry.has_value());
-    const auto best = (*registry)->bestDevice();
+    auto gpu_instance = GpuInstance::create({.windowSystem = platform::defaultWindowSystem()});
+    REQUIRE(gpu_instance.has_value());
+    const auto best = (*gpu_instance)->bestDevice();
     REQUIRE(best.has_value());
-    auto context = (*registry)->createContext(best.value_or(DeviceId(0)), {.presentation = true});
+    auto context =
+        (*gpu_instance)->createContext(best.value_or(DeviceId(0)), {.presentation = true});
     REQUIRE(context.has_value());
     auto window =
         platform::testing::TestWindow::create({.width = 320, .height = 240}, "dvv present test");
@@ -182,8 +183,8 @@ TEST_CASE("a presenter's objects are gone after it is destroyed") {
     presenter->reset();
     CHECK(livePresenters() == 0);
     context->reset();
-    CHECK((*registry)->validationMessageCount() == 0);
-    registry->reset();
+    CHECK((*gpu_instance)->validationMessageCount() == 0);
+    gpu_instance->reset();
     CHECK(LifetimeRegistry::instance().liveCount() == before);
 }
 

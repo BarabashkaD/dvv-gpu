@@ -60,7 +60,7 @@ std::unexpected<Error> vkBootstrapError(
 // Builds the instance with vk-bootstrap and the given extensions (the window system's); the
 // caller holds vkBootstrapMutex().
 vkb::Result<vkb::Instance> buildInstance(PFN_vkGetInstanceProcAddr get_instance_proc_addr,
-                                         const GpuRegistryOptions& options, InstanceCore* core,
+                                         const GpuInstanceOptions& options, InstanceCore* core,
                                          std::span<const char* const> extensions, bool debug_utils,
                                          ValidationMode validation) {
     static constexpr VkBool32 ENABLED = VK_TRUE;
@@ -105,7 +105,7 @@ vkb::Result<vkb::Instance> buildInstance(PFN_vkGetInstanceProcAddr get_instance_
 
 }  // namespace
 
-std::span<const char* const> windowSystemExtensions(const GpuRegistryOptions& options) noexcept {
+std::span<const char* const> windowSystemExtensions(const GpuInstanceOptions& options) noexcept {
     if (!options.windowSystem) {
         return {};
     }
@@ -156,7 +156,7 @@ Result<ValidationMode> parseValidationMode(std::string_view text) {
                      std::format("Vulkan validation mode must be off, on or sync, got '{}'", text));
 }
 
-Result<ValidationRequest> resolveValidation(const GpuRegistryOptions& options,
+Result<ValidationRequest> resolveValidation(const GpuInstanceOptions& options,
                                             const std::optional<std::string>& environment_mode,
                                             const std::optional<std::string>& environment_required,
                                             bool debug_build) {
@@ -254,7 +254,7 @@ std::string formatDebugMessage(Severity severity, vk::DebugUtilsMessageTypeFlags
     return std::format("Vulkan {} {} [{}]: {}", type_names, severity_name, id_name, message);
 }
 
-Result<std::unique_ptr<InstanceCore>> InstanceCore::create(const GpuRegistryOptions& options) {
+Result<std::unique_ptr<InstanceCore>> InstanceCore::create(const GpuInstanceOptions& options) {
     DVV_TRY(const ValidationRequest request,
             resolveValidation(options, getEnvironment("DVV_VK_VALIDATION"),
                               getEnvironment("DVV_VK_VALIDATION_REQUIRED"), DEBUG_BUILD));

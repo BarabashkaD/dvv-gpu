@@ -22,7 +22,7 @@
 #include "dvv/gpu/device_id.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_info.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "vk.h"
 
 namespace dvv::gpu::detail {
@@ -51,11 +51,11 @@ class DeviceCore {
 public:
     // Creates the device with the required features (and the supported optional ones), its
     // universal queue, the VMA allocator (buffer device addresses; memory budget when present) and
-    // the timeline semaphore. Keeps the registry, and with it the instance, alive. `presentation`
+    // the timeline semaphore. Keeps the GPU instance alive. `presentation`
     // also enables VK_KHR_swapchain (Errc::Unsupported when the device lacks it,
     // deviceExtensions()); the caller checks that the instance has a window system.
     [[nodiscard]] static Result<std::shared_ptr<DeviceCore>> create(
-        std::shared_ptr<const GpuRegistry> registry, const InstanceCore& instance,
+        std::shared_ptr<const GpuInstance> gpu_instance, const InstanceCore& instance,
         const PhysicalDevice& physical, const GpuInfo& info, bool presentation = false);
 
     DeviceCore(const DeviceCore&) = delete;
@@ -153,7 +153,7 @@ private:
     void setObjectName(vk::ObjectType type, std::uint64_t handle,
                        const std::string& name) const noexcept;
 
-    std::shared_ptr<const GpuRegistry> registry_;
+    std::shared_ptr<const GpuInstance> gpu_instance_;
     DeviceId id_{0};
     DeviceGeneration generation_ = FIRST_GENERATION;
     GpuInfo info_;

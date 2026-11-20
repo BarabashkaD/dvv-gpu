@@ -5,7 +5,7 @@
 #include <string_view>
 #include <utility>
 
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "vk_result.h"
 
 namespace dvv::gpu::detail {
@@ -67,7 +67,7 @@ Result<DeviceSupport> querySupport(vk::PhysicalDevice device, std::uint32_t api_
                                    });
     };
     support.optional.memoryBudget = has(vk::EXTMemoryBudgetExtensionName);
-    // Reported for every registry, also a headless one (dvv-gpu-info).
+    // Reported for every GPU instance, also a headless one (dvv-gpu-info).
     support.optional.swapchain = has(vk::KHRSwapchainExtensionName);
     return support;
 }
