@@ -120,7 +120,7 @@ private:
     void processCompletion() noexcept;
     void present();
     void recreateSwapchain();
-    void failSwapchain(VkResult result, std::string_view what);
+    void failSwapchain(vk::Result result, std::string_view what);
     void teardown() noexcept;
     void releaseVulkanObjects() noexcept;
     void fail(Error error) noexcept;
@@ -141,12 +141,14 @@ private:
     // Presenter thread only (and initialise()/the destructor while no thread runs).
     PresenterLogic logic_;
     Requests snapshot_{};
+    // C, not vk::SurfaceKHR: surface creators are reached through vkGetInstanceProcAddr (no
+    // vk-bootstrap surface helpers), and they return the C handle.
     VkSurfaceKHR surface_ = VK_NULL_HANDLE;
     VkSurfaceFormatKHR format_{};
-    VkFence fence_ = VK_NULL_HANDLE;
+    vk::Fence fence_;
     bool fence_leaked_ = false;  // the 5 s cap of design M1b §5.2 step 4 passed: never destroyed
-    VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
-    std::vector<VkImage> images_;
+    vk::SwapchainKHR swapchain_;
+    std::vector<vk::Image> images_;
     VkExtent2D extent_{};
     std::uint32_t acquired_index_ = 0;
     bool in_flight_ = false;

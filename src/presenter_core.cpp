@@ -42,8 +42,8 @@ Error surfaceLost() {
 // A VK_ERROR_DEVICE_LOST that the presenter sees puts its context into the lost state (design M3
 // §4.1), so creators refuse and destruction does not save the pipeline cache. Called without the
 // queue lock (markLost logs) and before fail(), so that onError already sees a lost context.
-void markIfLost(DeviceCore& device, VkResult result, std::string_view where) noexcept {
-    if (result == VK_ERROR_DEVICE_LOST) {
+void markIfLost(DeviceCore& device, vk::Result result, std::string_view where) noexcept {
+    if (result == vk::Result::eErrorDeviceLost) {
         device.markLost(LostCause::Driver, where);
     }
 }
@@ -153,6 +153,8 @@ PresenterCore::~PresenterCore() {
 }
 
 Result<void> PresenterCore::initialise() {
+    // Stays C: surface creators are reached through vkGetInstanceProcAddr (no vk-bootstrap surface
+    // helpers).
     const auto surface = detail::createSurface(instance_, get_instance_proc_addr_, window_);
     if (!surface) {
         return vkError(surface.error(),
@@ -160,40 +162,42 @@ Result<void> PresenterCore::initialise() {
     }
     surface_ = *surface;
     const auto& api = device_->dispatch();
-    const auto physical = static_cast<VkPhysicalDevice>(device_->physicalDevice());
+    const vk::PhysicalDevice physical = device_->physicalDevice();
+    const vk::SurfaceKHR surface_handle(surface_);
 
-    VkBool32 supported = VK_FALSE;
-    DVV_TRY_VOID(vkCheck(api.vkGetPhysicalDeviceSurfaceSupportKHR(physical, device_->queueFamily(),
-                                                                  surface_, &supported),
-                         "vkGetPhysicalDeviceSurfaceSupportKHR"));
-    if (supported == VK_FALSE) {
+    // The out-parameter form: the value form copies an unset Bool32 when the call fails.
+    vk::Bool32 supported = vk::False;
+    DVV_TRY_VOID(vkCheck(
+        physical.getSurfaceSupportKHR(device_->queueFamily(), surface_handle, &supported, api),
+        "vkGetPhysicalDeviceSurfaceSupportKHR"));
+    if (supported == vk::False) {
         return makeError(Errc::Unsupported,
                          std::format("presenter '{}': the queue of device {} cannot present to "
                                      "the window",
                                      name_, device_->id()));
     }
-    VkSurfaceCapabilitiesKHR caps{};
-    DVV_TRY_VOID(vkCheck(api.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, surface_, &caps),
-                         "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"));
-    if ((caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0) {
+    const auto caps = physical.getSurfaceCapabilitiesKHR(surface_handle, api);
+    DVV_TRY_VOID(vkCheck(caps.result, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"));
+    if (!(caps.value.supportedUsageFlags & vk::ImageUsageFlagBits::eTransferDst)) {
         return makeError(Errc::Unsupported,
                          std::format("presenter '{}': swapchain images of device {} cannot be "
                                      "transfer destinations",
                                      name_, device_->id()));
     }
-    std::vector<VkSurfaceFormatKHR> formats;
-    VkResult listed = VK_INCOMPLETE;
-    while (listed == VK_INCOMPLETE) {
+    // The count-and-fill form, not the vector one: that one reads its count unset when the first
+    // call fails.
+    std::vector<vk::SurfaceFormatKHR> listed_formats;
+    vk::Result listed = vk::Result::eIncomplete;
+    while (listed == vk::Result::eIncomplete) {
         std::uint32_t count = 0;
-        DVV_TRY_VOID(
-            vkCheck(api.vkGetPhysicalDeviceSurfaceFormatsKHR(physical, surface_, &count, nullptr),
-                    "vkGetPhysicalDeviceSurfaceFormatsKHR"));
-        formats.resize(count);
-        listed =
-            api.vkGetPhysicalDeviceSurfaceFormatsKHR(physical, surface_, &count, formats.data());
-        formats.resize(count);
+        DVV_TRY_VOID(vkCheck(physical.getSurfaceFormatsKHR(surface_handle, &count, nullptr, api),
+                             "vkGetPhysicalDeviceSurfaceFormatsKHR"));
+        listed_formats.resize(count);
+        listed = physical.getSurfaceFormatsKHR(surface_handle, &count, listed_formats.data(), api);
+        listed_formats.resize(count);
     }
     DVV_TRY_VOID(vkCheck(listed, "vkGetPhysicalDeviceSurfaceFormatsKHR"));
+    const std::vector<VkSurfaceFormatKHR> formats(listed_formats.begin(), listed_formats.end());
     const std::optional<VkSurfaceFormatKHR> format = chooseSurfaceFormat(formats);
     if (!format) {
         return makeError(Errc::Unsupported,
@@ -207,12 +211,10 @@ Result<void> PresenterCore::initialise() {
                         name_, vk::to_string(static_cast<vk::Format>(format->format))));
     }
     format_ = *format;
-    const VkFenceCreateInfo fence_info{
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .pNext = nullptr, .flags = 0};
-    DVV_TRY_VOID(vkCheck(
-        api.vkCreateFence(static_cast<VkDevice>(device_->device()), &fence_info, nullptr, &fence_),
-        "vkCreateFence"));
-    device_->setDebugName(vk::Fence(fence_), name_ + " acquire fence");
+    const auto fence = device_->device().createFence(vk::FenceCreateInfo{}, nullptr, api);
+    DVV_TRY_VOID(vkCheck(fence.result, "vkCreateFence"));
+    fence_ = fence.value;
+    device_->setDebugName(fence_, name_ + " acquire fence");
     return {};
 }
 
@@ -454,17 +456,19 @@ Result<void> PresenterCore::checkImage(const std::shared_ptr<GpuImage>& image) {
 // design M1b §5.2 steps 3 and 4: acquire with the fence, then wait for it on the host.
 VkOutcome PresenterCore::acquire(std::uint32_t& index) {
     const auto& api = device_->dispatch();
-    const auto device = static_cast<VkDevice>(device_->device());
-    const VkResult result = api.vkAcquireNextImageKHR(device, swapchain_, ACQUIRE_TIMEOUT_NS,
-                                                      VK_NULL_HANDLE, fence_, &index);
+    const vk::Device device = device_->device();
+    // The out-parameter form: it returns every result unchecked (eErrorOutOfDateKHR too), and the
+    // value form copies an unset index when the call fails.
+    const vk::Result result =
+        device.acquireNextImageKHR(swapchain_, ACQUIRE_TIMEOUT_NS, {}, fence_, &index, api);
     switch (result) {
-        case VK_SUCCESS:
-        case VK_SUBOPTIMAL_KHR: break;
-        case VK_TIMEOUT:
-        case VK_NOT_READY: return VkOutcome::Timeout;
-        case VK_ERROR_OUT_OF_DATE_KHR: return VkOutcome::OutOfDate;
-        case VK_ERROR_SURFACE_LOST_KHR: fail(surfaceLost()); return VkOutcome::SurfaceLost;
-        case VK_ERROR_DEVICE_LOST:
+        case vk::Result::eSuccess:
+        case vk::Result::eSuboptimalKHR: break;
+        case vk::Result::eTimeout:
+        case vk::Result::eNotReady: return VkOutcome::Timeout;
+        case vk::Result::eErrorOutOfDateKHR: return VkOutcome::OutOfDate;
+        case vk::Result::eErrorSurfaceLostKHR: fail(surfaceLost()); return VkOutcome::SurfaceLost;
+        case vk::Result::eErrorDeviceLost:
             markIfLost(*device_, result, "vkAcquireNextImageKHR");
             fail(vkError(result, "vkAcquireNextImageKHR").error());
             return VkOutcome::DeviceLost;
@@ -476,14 +480,15 @@ VkOutcome PresenterCore::acquire(std::uint32_t& index) {
     // signals or the device is lost, also when stop is set; stop is acted on only afterwards.
     const auto deadline = std::chrono::steady_clock::now() + FENCE_CAP;
     while (true) {
-        const VkResult waited = api.vkWaitForFences(device, 1, &fence_, VK_TRUE, FENCE_SLICE_NS);
-        if (waited == VK_SUCCESS) {
+        const vk::Result waited = device.waitForFences(fence_, vk::True, FENCE_SLICE_NS, api);
+        if (waited == vk::Result::eSuccess) {
             break;
         }
-        if (waited != VK_TIMEOUT) {
+        if (waited != vk::Result::eTimeout) {
             markIfLost(*device_, waited, "vkWaitForFences (acquire fence)");
             fail(vkError(waited, "vkWaitForFences (acquire fence)").error());
-            return waited == VK_ERROR_DEVICE_LOST ? VkOutcome::DeviceLost : VkOutcome::OtherError;
+            return waited == vk::Result::eErrorDeviceLost ? VkOutcome::DeviceLost
+                                                          : VkOutcome::OtherError;
         }
         if (std::chrono::steady_clock::now() >= deadline) {
             fence_leaked_ = true;  // destroying a fence the driver may still signal is invalid
@@ -491,12 +496,13 @@ VkOutcome PresenterCore::acquire(std::uint32_t& index) {
             return VkOutcome::OtherError;
         }
     }
-    if (const VkResult reset = api.vkResetFences(device, 1, &fence_); reset != VK_SUCCESS) {
+    if (const vk::Result reset = device.resetFences(fence_, api); reset != vk::Result::eSuccess) {
         markIfLost(*device_, reset, "vkResetFences");
         fail(vkError(reset, "vkResetFences").error());
-        return reset == VK_ERROR_DEVICE_LOST ? VkOutcome::DeviceLost : VkOutcome::OtherError;
+        return reset == vk::Result::eErrorDeviceLost ? VkOutcome::DeviceLost
+                                                     : VkOutcome::OtherError;
     }
-    return result == VK_SUCCESS ? VkOutcome::Success : VkOutcome::Suboptimal;
+    return result == vk::Result::eSuccess ? VkOutcome::Success : VkOutcome::Suboptimal;
 }
 
 // design M1b §5.2 step 5: hand the frame to the submit thread through a FrameJob.
@@ -507,7 +513,7 @@ void PresenterCore::startFrame(PresentFrame frame, std::uint32_t index) noexcept
         // D6: blit into the swapchain image, at the swapchain's real extent, and move it to
         // PRESENT_SRC_KHR (Task 8).
         RecordFunction record = [client = std::move(frame.record), image = std::move(frame.image),
-                                 target = images_[index],
+                                 target = static_cast<VkImage>(images_[index]),
                                  extent = extent_](CommandRecorder& recorder) mutable {
             if (client) {
                 client(recorder);
@@ -546,30 +552,29 @@ void PresenterCore::processCompletion() noexcept {
 
 // design M1b §5.2 step 6, second half: present without wait semaphores (D4), under the queue lock.
 void PresenterCore::present() {
-    const VkPresentInfoKHR info{.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-                                .pNext = nullptr,
-                                .waitSemaphoreCount = 0,
-                                .pWaitSemaphores = nullptr,
-                                .swapchainCount = 1,
-                                .pSwapchains = &swapchain_,
-                                .pImageIndices = &acquired_index_,
-                                .pResults = nullptr};
-    VkResult result = VK_SUCCESS;
+    const vk::PresentInfoKHR info{.waitSemaphoreCount = 0,
+                                  .pWaitSemaphores = nullptr,
+                                  .swapchainCount = 1,
+                                  .pSwapchains = &swapchain_,
+                                  .pImageIndices = &acquired_index_,
+                                  .pResults = nullptr};
+    vk::Result result = vk::Result::eSuccess;
     {
         const auto queue_lock = device_->lockQueue();
-        result =
-            device_->dispatch().vkQueuePresentKHR(static_cast<VkQueue>(device_->queue()), &info);
+        // A result, not an assert, for eErrorOutOfDateKHR too: VULKAN_HPP_ASSERT_ON_RESULT is a
+        // no-op (vk.h).
+        result = device_->queue().presentKHR(info, device_->dispatch());
     }
     VkOutcome outcome = VkOutcome::Success;
     switch (result) {
-        case VK_SUCCESS: break;
-        case VK_SUBOPTIMAL_KHR: outcome = VkOutcome::Suboptimal; break;
-        case VK_ERROR_OUT_OF_DATE_KHR: outcome = VkOutcome::OutOfDate; break;
-        case VK_ERROR_SURFACE_LOST_KHR:
+        case vk::Result::eSuccess: break;
+        case vk::Result::eSuboptimalKHR: outcome = VkOutcome::Suboptimal; break;
+        case vk::Result::eErrorOutOfDateKHR: outcome = VkOutcome::OutOfDate; break;
+        case vk::Result::eErrorSurfaceLostKHR:
             fail(surfaceLost());
             outcome = VkOutcome::SurfaceLost;
             break;
-        case VK_ERROR_DEVICE_LOST:
+        case vk::Result::eErrorDeviceLost:
             markIfLost(*device_, result, "vkQueuePresentKHR");  // after the queue-lock scope
             fail(vkError(result, "vkQueuePresentKHR").error());
             outcome = VkOutcome::DeviceLost;
@@ -590,76 +595,73 @@ void PresenterCore::present() {
 // design M1b §5.3: only in phase Idle (the logic asks for it only then).
 void PresenterCore::recreateSwapchain() {
     const auto& api = device_->dispatch();
-    const auto device = static_cast<VkDevice>(device_->device());
-    VkSurfaceCapabilitiesKHR caps{};
-    if (const VkResult result = api.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-            static_cast<VkPhysicalDevice>(device_->physicalDevice()), surface_, &caps);
-        result != VK_SUCCESS) {
-        failSwapchain(result, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    const vk::Device device = device_->device();
+    const auto caps =
+        device_->physicalDevice().getSurfaceCapabilitiesKHR(vk::SurfaceKHR(surface_), api);
+    if (caps.result != vk::Result::eSuccess) {
+        failSwapchain(caps.result, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
         return;
     }
-    const VkExtent2D extent = swapchainExtent(caps, snapshot_.extent);
+    const VkExtent2D extent = swapchainExtent(caps.value, snapshot_.extent);
     if (extent.width == 0 || extent.height == 0) {
         logic_.surfaceHidden();  // step 2: keep the old swapchain and the request
         return;
     }
-    const VkSwapchainCreateInfoKHR info{
-        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .pNext = nullptr,
-        .flags = 0,
-        .surface = surface_,
-        .minImageCount = swapchainImageCount(caps),
-        .imageFormat = format_.format,
-        .imageColorSpace = format_.colorSpace,
-        .imageExtent = extent,
+    const vk::SwapchainCreateInfoKHR info{
+        .surface = vk::SurfaceKHR(surface_),
+        .minImageCount = swapchainImageCount(caps.value),
+        .imageFormat = static_cast<vk::Format>(format_.format),
+        .imageColorSpace = static_cast<vk::ColorSpaceKHR>(format_.colorSpace),
+        .imageExtent = {.width = extent.width, .height = extent.height},
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .imageUsage = vk::ImageUsageFlagBits::eTransferDst,
+        .imageSharingMode = vk::SharingMode::eExclusive,
         .queueFamilyIndexCount = 0,
         .pQueueFamilyIndices = nullptr,
-        .preTransform = caps.currentTransform,
-        .compositeAlpha = compositeAlpha(caps.supportedCompositeAlpha),
-        .presentMode = VK_PRESENT_MODE_FIFO_KHR,
-        .clipped = VK_TRUE,
+        .preTransform = caps.value.currentTransform,
+        .compositeAlpha = static_cast<vk::CompositeAlphaFlagBitsKHR>(compositeAlpha(
+            static_cast<VkCompositeAlphaFlagsKHR>(caps.value.supportedCompositeAlpha))),
+        .presentMode = vk::PresentModeKHR::eFifo,
+        .clipped = vk::True,
         .oldSwapchain = swapchain_};
-    VkSwapchainKHR created = VK_NULL_HANDLE;
-    if (const VkResult result = api.vkCreateSwapchainKHR(device, &info, nullptr, &created);
-        result != VK_SUCCESS) {
+    const auto created = device.createSwapchainKHR(info, nullptr, api);
+    if (created.result != vk::Result::eSuccess) {
         // The old swapchain is retired all the same; teardown() destroys it.
-        failSwapchain(result, "vkCreateSwapchainKHR");
+        failSwapchain(created.result, "vkCreateSwapchainKHR");
         return;
     }
-    const VkSwapchainKHR old = std::exchange(swapchain_, created);
+    const vk::SwapchainKHR old = std::exchange(swapchain_, created.value);
     images_.clear();
     extent_ = extent;
-    if (old != VK_NULL_HANDLE) {
+    if (old) {
         // D7: presentation is done with the old images once the queue is idle (accepted practice
         // without VK_KHR_swapchain_maintenance1; exact retirement is F3).
-        VkResult idle = VK_SUCCESS;
+        vk::Result idle = vk::Result::eSuccess;
         {
             const auto queue_lock = device_->lockQueue();
-            idle = api.vkQueueWaitIdle(static_cast<VkQueue>(device_->queue()));
+            idle = device_->queue().waitIdle(api);
         }
-        api.vkDestroySwapchainKHR(device, old, nullptr);
-        if (idle != VK_SUCCESS) {
+        device.destroySwapchainKHR(old, nullptr, api);
+        if (idle != vk::Result::eSuccess) {
             failSwapchain(idle, "vkQueueWaitIdle");
             return;
         }
     }
+    // The count-and-fill form, not the vector one: that one reads its count unset when the first
+    // call fails, and it would retry an eIncomplete that is an error here.
     std::uint32_t count = 0;
-    VkResult listed = api.vkGetSwapchainImagesKHR(device, swapchain_, &count, nullptr);
-    if (listed == VK_SUCCESS) {
+    vk::Result listed = device.getSwapchainImagesKHR(swapchain_, &count, nullptr, api);
+    if (listed == vk::Result::eSuccess) {
         images_.resize(count);
-        listed = api.vkGetSwapchainImagesKHR(device, swapchain_, &count, images_.data());
+        listed = device.getSwapchainImagesKHR(swapchain_, &count, images_.data(), api);
     }
-    if (listed != VK_SUCCESS) {
+    if (listed != vk::Result::eSuccess) {
         failSwapchain(listed, "vkGetSwapchainImagesKHR");
         return;
     }
-    device_->setDebugName(vk::SwapchainKHR(swapchain_), name_ + " swapchain");
+    device_->setDebugName(swapchain_, name_ + " swapchain");
     for (std::size_t i = 0; i < images_.size(); ++i) {
-        device_->setDebugName(vk::Image(images_[i]),
-                              std::format("{} swapchain image {}", name_, i));
+        device_->setDebugName(images_[i], std::format("{} swapchain image {}", name_, i));
     }
     {
         const std::lock_guard lock(mutex_);
@@ -670,46 +672,47 @@ void PresenterCore::recreateSwapchain() {
     logic_.swapchainCreated(snapshot_.extent);  // stores the hint used; internal re-request
 }
 
-void PresenterCore::failSwapchain(VkResult result, std::string_view what) {
-    if (result == VK_ERROR_SURFACE_LOST_KHR) {
+void PresenterCore::failSwapchain(vk::Result result, std::string_view what) {
+    if (result == vk::Result::eErrorSurfaceLostKHR) {
         fail(surfaceLost());
         logic_.acquired(VkOutcome::SurfaceLost);  // plan choice: see the logic contract, rule 6
         return;
     }
     markIfLost(*device_, result, what);
     fail(vkError(result, std::format("{} (presenter '{}')", what, name_)).error());
-    logic_.acquired(result == VK_ERROR_DEVICE_LOST ? VkOutcome::DeviceLost : VkOutcome::OtherError);
+    logic_.acquired(result == vk::Result::eErrorDeviceLost ? VkOutcome::DeviceLost
+                                                           : VkOutcome::OtherError);
 }
 
 // design M1b §5.5: Exit. No frame is in flight here.
 void PresenterCore::teardown() noexcept {
-    VkResult idle = VK_SUCCESS;
+    vk::Result idle = vk::Result::eSuccess;
     {
         const auto queue_lock = device_->lockQueue();
-        idle = device_->dispatch().vkQueueWaitIdle(static_cast<VkQueue>(device_->queue()));
+        idle = device_->queue().waitIdle(device_->dispatch());
     }
     markIfLost(*device_, idle, "vkQueueWaitIdle");
-    if (idle != VK_SUCCESS) {
+    if (idle != vk::Result::eSuccess) {
         DVV_LOG_ERROR("presenter '{}': vkQueueWaitIdle failed while closing: {}", name_,
-                      vk::to_string(static_cast<vk::Result>(idle)));
+                      vk::to_string(idle));
     }
     releaseVulkanObjects();
 }
 
 void PresenterCore::releaseVulkanObjects() noexcept {
     const auto& api = device_->dispatch();
-    const auto device = static_cast<VkDevice>(device_->device());
-    if (swapchain_ != VK_NULL_HANDLE) {
-        api.vkDestroySwapchainKHR(device, swapchain_, nullptr);
-        swapchain_ = VK_NULL_HANDLE;
+    const vk::Device device = device_->device();
+    if (swapchain_) {
+        device.destroySwapchainKHR(swapchain_, nullptr, api);
+        swapchain_ = nullptr;
     }
     images_.clear();
-    if (fence_ != VK_NULL_HANDLE && !fence_leaked_) {
-        api.vkDestroyFence(device, fence_, nullptr);
+    if (fence_ && !fence_leaked_) {
+        device.destroyFence(fence_, nullptr, api);
     }
-    fence_ = VK_NULL_HANDLE;
+    fence_ = nullptr;
     if (surface_ != VK_NULL_HANDLE) {
-        api.vkDestroySurfaceKHR(instance_, surface_, nullptr);
+        vk::Instance(instance_).destroySurfaceKHR(vk::SurfaceKHR(surface_), nullptr, api);
         surface_ = VK_NULL_HANDLE;
     }
 }
