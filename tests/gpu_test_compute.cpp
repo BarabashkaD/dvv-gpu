@@ -14,6 +14,7 @@
 #include "dvv/base/error.h"
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/compute_pipeline.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/resource_pool.h"
 #include "dvv/gpu/resources.h"
@@ -24,6 +25,9 @@ using dvv::gpu::BufferDesc;
 using dvv::gpu::CommandRecorder;
 using dvv::gpu::ComputePipeline;
 using dvv::gpu::GpuBuffer;
+using dvv::gpu::GroupCount;
+using dvv::gpu::MappedRead;
+using dvv::gpu::MappedWrite;
 using dvv::gpu::MemoryUsage;
 using dvv::gpu::test::GpuTest;
 
@@ -63,14 +67,15 @@ std::vector<std::uint32_t> expected(std::uint32_t added) {
 
 void write(GpuBuffer& buffer, const std::vector<std::uint32_t>& values) {
     REQUIRE(buffer.size() == values.size() * sizeof(std::uint32_t));
-    std::memcpy(buffer.mapped().data(), values.data(), buffer.size());
-    REQUIRE(buffer.flush().has_value());
+    MappedWrite scope = buffer.mapWrite();
+    std::memcpy(scope.bytes().data(), values.data(), buffer.size());
+    REQUIRE(scope.flush().has_value());
 }
 
 std::vector<std::uint32_t> read(GpuBuffer& buffer) {
-    REQUIRE(buffer.invalidate().has_value());
+    const MappedRead scope = buffer.mapRead().value();
     std::vector<std::uint32_t> values(buffer.size() / sizeof(std::uint32_t));
-    std::memcpy(values.data(), buffer.mapped().data(), buffer.size());
+    std::memcpy(values.data(), scope.bytes().data(), buffer.size());
     return values;
 }
 
@@ -88,15 +93,32 @@ std::size_t mismatches(const std::vector<std::uint32_t>& values,
 // Records add_one over the first COUNT values of the buffer.
 void addOne(CommandRecorder& recorder, const ComputePipeline& pipeline, const GpuBuffer& buffer) {
     const AddOne push{.data = buffer.deviceAddress(), .count = COUNT};
-    recorder.dispatch(pipeline, std::as_bytes(std::span(&push, 1)), GROUPS);
+    recorder.dispatch(pipeline, std::as_bytes(std::span(&push, 1)), GroupCount{GROUPS});
 }
+
+// Overload safety (compile time only): every call form of the old trailing-count dispatch and the
+// braced GroupCount forms resolves to exactly one overload.
+template <class Recorder>
+concept DispatchCallForms =
+    requires(Recorder& recorder, const dvv::gpu::ComputePipeline& pipeline,
+             std::span<const std::byte> bytes, std::span<dvv::gpu::GpuImage* const> images) {
+        recorder.dispatch(pipeline, bytes, 8);
+        recorder.dispatch(pipeline, bytes, 8, 8);
+        recorder.dispatch(pipeline, bytes, {8, 8});
+        recorder.dispatch(pipeline, bytes, {8});
+        recorder.dispatch(pipeline, bytes, images, 8);
+        recorder.dispatch(pipeline, bytes, images, 8, 8);
+        recorder.dispatch(pipeline, bytes, images, {8, 8});
+        recorder.dispatch(pipeline, bytes, images, {8});
+    };
+static_assert(DispatchCallForms<dvv::gpu::CommandRecorder>);
 
 }  // namespace
 
 TEST_CASE_FIXTURE(GpuTest, "add_one adds 1 to every value of a buffer") {
     const auto pipeline =
-        context().createComputePipeline(test_shaders::addOne(), sizeof(AddOne)).value();
-    const auto buffer = context().createBuffer(VALUES).value();
+        createComputePipeline(context(), test_shaders::addOne(), sizeof(AddOne)).value();
+    const auto buffer = createBuffer(context(), VALUES).value();
     write(*buffer, expected(0));
 
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
@@ -110,8 +132,8 @@ TEST_CASE_FIXTURE(GpuTest, "a dispatch sees the writes of the dispatch before it
     // recorder nor synchronization validation can follow: only the recorder's automatic barrier
     // between the two dispatches orders them.
     const auto pipeline =
-        context().createComputePipeline(test_shaders::addOne(), sizeof(AddOne)).value();
-    const auto buffer = context().createBuffer(VALUES).value();
+        createComputePipeline(context(), test_shaders::addOne(), sizeof(AddOne)).value();
+    const auto buffer = createBuffer(context(), VALUES).value();
     write(*buffer, expected(0));
 
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
@@ -131,7 +153,7 @@ TEST_CASE_FIXTURE(GpuTest, "a dispatch sees the writes of the dispatch before it
 
 TEST_CASE_FIXTURE(GpuTest, "a pooled buffer is reused once the GPU has finished with it") {
     const auto pipeline =
-        context().createComputePipeline(test_shaders::addOne(), sizeof(AddOne)).value();
+        createComputePipeline(context(), test_shaders::addOne(), sizeof(AddOne)).value();
     const auto pool = context().createResourcePool().value();
     auto lease = pool->acquireBuffer(VALUES).value();
     const VkBuffer handle = lease->handle();
@@ -182,4 +204,35 @@ TEST_CASE_FIXTURE(GpuTest, "a pooled buffer is reused once the GPU has finished 
                 addOne(recorder, *pipeline, *again);
             }).has_value());
     CHECK(mismatches(read(*again), expected(2)) == 0);
+}
+
+// The shader indexes by the x group only, so the y count stays 1 (a larger y would repeat every
+// write and race).
+TEST_CASE_FIXTURE(GpuTest, "a GroupCount dispatch equals the three-integer dispatch") {
+    constexpr std::uint32_t X_GROUPS = 2;
+    constexpr std::uint32_t WRITTEN = X_GROUPS * GROUP_SIZE;
+    const auto pipeline =
+        createComputePipeline(context(), test_shaders::addOne(), sizeof(AddOne)).value();
+    const auto named = createBuffer(context(), VALUES).value();
+    const auto braced = createBuffer(context(), VALUES).value();
+    const auto old_form = createBuffer(context(), VALUES).value();
+    write(*named, expected(0));
+    write(*braced, expected(0));
+    write(*old_form, expected(0));
+    const AddOne named_push{.data = named->deviceAddress(), .count = WRITTEN};
+    const AddOne braced_push{.data = braced->deviceAddress(), .count = WRITTEN};
+    const AddOne old_push{.data = old_form->deviceAddress(), .count = WRITTEN};
+
+    REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
+                recorder.dispatch(*pipeline, std::as_bytes(std::span(&named_push, 1)),
+                                  GroupCount{X_GROUPS, 1});
+                recorder.dispatch(*pipeline, std::as_bytes(std::span(&braced_push, 1)),
+                                  {X_GROUPS, 1});
+                recorder.dispatch(*pipeline, std::as_bytes(std::span(&old_push, 1)), X_GROUPS, 1);
+            }).has_value());
+    const std::vector<std::uint32_t> from_named = read(*named);
+    CHECK(from_named == read(*braced));
+    CHECK(from_named == read(*old_form));
+    CHECK(from_named[WRITTEN - 1] == ((WRITTEN - 1) * 3) + 1);
+    CHECK(from_named[WRITTEN] == (WRITTEN * 3));
 }

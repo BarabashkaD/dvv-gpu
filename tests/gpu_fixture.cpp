@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "dvv/base/task.h"
+#include "dvv/gpu/context_vulkan.h"
 
 namespace dvv::gpu::test {
 
@@ -19,7 +20,7 @@ namespace {
 
 Task<Result<std::uint64_t>> submitTask(ExecutionContext& context, IExecutor& executor,
                                        RecordFunction record) {
-    co_return co_await context.submit(executor, std::move(record));
+    co_return co_await submit(context, executor, std::move(record));
 }
 
 }  // namespace
@@ -62,21 +63,21 @@ Result<std::uint64_t> submitAndWait(ExecutionContext& context, IExecutor& execut
 }
 
 GpuTest::GpuTest() {
-    auto registry = GpuRegistry::create();
-    if (!registry) {
-        FAIL(registry.error().describe());
+    auto gpu_instance = GpuInstance::create();
+    if (!gpu_instance) {
+        FAIL(gpu_instance.error().describe());
     }
-    registry_ = std::move(*registry);
+    gpu_instance_ = std::move(*gpu_instance);
 }
 
 GpuTest::~GpuTest() {
     context_.reset();
     executor_.reset();
-    CHECK(registry_->validationMessageCount() == 0);
+    CHECK(gpu_instance_->validationMessageCount() == 0);
 }
 
 DeviceId GpuTest::device() const {
-    if (const auto best = registry_->bestDevice()) {
+    if (const auto best = gpu_instance_->bestDevice()) {
         return *best;
     }
     FAIL("no usable Vulkan device");
@@ -85,7 +86,7 @@ DeviceId GpuTest::device() const {
 
 ExecutionContext& GpuTest::context() {
     if (!context_) {
-        auto context = registry_->createContext(device());
+        auto context = gpu_instance_->createContext(device());
         if (!context) {
             FAIL(context.error().describe());
         }

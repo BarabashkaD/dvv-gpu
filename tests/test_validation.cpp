@@ -6,21 +6,25 @@
 #include "dvv/base/error.h"
 #include "dvv/base/log.h"
 #include "dvv/gpu/gpu_info.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "instance.h"
 
 using dvv::Errc;
 using dvv::LogLevel;
-using dvv::gpu::GpuRegistryOptions;
+using dvv::gpu::GpuInstanceOptions;
 using dvv::gpu::ValidationMode;
+using dvv::gpu::detail::BuildType;
 using dvv::gpu::detail::countsAsFailure;
 using dvv::gpu::detail::debugMessageLevel;
 using dvv::gpu::detail::effectiveValidation;
+using dvv::gpu::detail::FailedStep;
 using dvv::gpu::detail::formatDebugMessage;
+using dvv::gpu::detail::LayerPresence;
 using dvv::gpu::detail::parseValidationMode;
+using dvv::gpu::detail::Requirement;
 using dvv::gpu::detail::resolveValidation;
 using dvv::gpu::detail::retryWithoutValidation;
-using dvv::gpu::detail::ValidationRequest;
+using dvv::gpu::detail::ValidationChoice;
 using Severity = vk::DebugUtilsMessageSeverityFlagBitsEXT;
 using Type = vk::DebugUtilsMessageTypeFlagBitsEXT;
 using Types = vk::DebugUtilsMessageTypeFlagsEXT;
@@ -44,56 +48,57 @@ TEST_CASE("validation modes parse from off, on and sync") {
 }
 
 TEST_CASE("validation defaults to on in Debug builds and off in Release builds") {
-    const auto debug = resolveValidation({}, UNSET, UNSET, true).value();
+    const auto debug = resolveValidation({}, UNSET, UNSET, BuildType::Debug).value();
     CHECK(debug.mode == ValidationMode::On);
     CHECK_FALSE(debug.required);
     CHECK_FALSE(debug.explicitlyRequested);
-    CHECK(resolveValidation({}, UNSET, UNSET, false).value().mode == ValidationMode::Off);
+    CHECK(resolveValidation({}, UNSET, UNSET, BuildType::Release).value().mode ==
+          ValidationMode::Off);
     // An empty variable counts as unset.
-    CHECK(resolveValidation({}, std::string(), std::string(), false).value().mode ==
+    CHECK(resolveValidation({}, std::string(), std::string(), BuildType::Release).value().mode ==
           ValidationMode::Off);
 }
 
 TEST_CASE("the environment sets validation unless the options do") {
-    const auto from_environment = resolveValidation({}, "sync", "1", false).value();
+    const auto from_environment = resolveValidation({}, "sync", "1", BuildType::Release).value();
     CHECK(from_environment.mode == ValidationMode::Sync);
     CHECK(from_environment.required);
     CHECK(from_environment.explicitlyRequested);
-    CHECK_FALSE(resolveValidation({}, "off", "0", true).value().required);
+    CHECK_FALSE(resolveValidation({}, "off", "0", BuildType::Debug).value().required);
 
-    const GpuRegistryOptions options{.validation = ValidationMode::Off,
+    const GpuInstanceOptions options{.validation = ValidationMode::Off,
                                      .validationRequired = false};
-    const auto from_options = resolveValidation(options, "sync", "1", true).value();
+    const auto from_options = resolveValidation(options, "sync", "1", BuildType::Debug).value();
     CHECK(from_options.mode == ValidationMode::Off);
     CHECK_FALSE(from_options.required);
     CHECK(from_options.explicitlyRequested);
 }
 
 TEST_CASE("bad validation variables are format errors") {
-    const auto mode = resolveValidation({}, "full", UNSET, true);
+    const auto mode = resolveValidation({}, "full", UNSET, BuildType::Debug);
     REQUIRE_FALSE(mode.has_value());
     CHECK(mode.error().code == Errc::Format);
     CHECK(mode.error().message == "DVV_VK_VALIDATION must be off, on or sync, got 'full'");
 
-    const auto required = resolveValidation({}, UNSET, "yes", true);
+    const auto required = resolveValidation({}, UNSET, "yes", BuildType::Debug);
     REQUIRE_FALSE(required.has_value());
     CHECK(required.error().code == Errc::Format);
     CHECK(required.error().message == "DVV_VK_VALIDATION_REQUIRED must be 0 or 1, got 'yes'");
 
     // Variables that the options override are not read at all.
     CHECK(resolveValidation({.validation = ValidationMode::On, .validationRequired = true}, "full",
-                            "yes", true)
+                            "yes", BuildType::Debug)
               .has_value());
 }
 
 TEST_CASE("a missing validation layer turns validation off unless it is required") {
-    const ValidationRequest sync{.mode = ValidationMode::Sync};
-    CHECK(effectiveValidation(sync, true).value() == ValidationMode::Sync);
-    CHECK(effectiveValidation(sync, false).value() == ValidationMode::Off);
+    const ValidationChoice sync{.mode = ValidationMode::Sync};
+    CHECK(effectiveValidation(sync, LayerPresence::Installed).value() == ValidationMode::Sync);
+    CHECK(effectiveValidation(sync, LayerPresence::Missing).value() == ValidationMode::Off);
 
-    const ValidationRequest required{.mode = ValidationMode::On, .required = true};
-    CHECK(effectiveValidation(required, true).value() == ValidationMode::On);
-    const auto missing = effectiveValidation(required, false);
+    const ValidationChoice required{.mode = ValidationMode::On, .required = true};
+    CHECK(effectiveValidation(required, LayerPresence::Installed).value() == ValidationMode::On);
+    const auto missing = effectiveValidation(required, LayerPresence::Missing);
     REQUIRE_FALSE(missing.has_value());
     CHECK(missing.error().code == Errc::Unsupported);
     CHECK(missing.error().message ==
@@ -101,8 +106,8 @@ TEST_CASE("a missing validation layer turns validation off unless it is required
           "installed");
 
     // Requiring validation while switching it off asks for nothing.
-    const ValidationRequest off{.mode = ValidationMode::Off, .required = true};
-    CHECK(effectiveValidation(off, false).value() == ValidationMode::Off);
+    const ValidationChoice off{.mode = ValidationMode::Off, .required = true};
+    CHECK(effectiveValidation(off, LayerPresence::Missing).value() == ValidationMode::Off);
 }
 
 TEST_CASE("errors and validation or performance warnings count as failures") {
@@ -156,22 +161,23 @@ TEST_CASE("the messenger callback counts by the policy and survives missing stri
 }
 
 TEST_CASE("a validation layer that fails to load is dropped unless validation is required") {
-    constexpr bool CREATE_INSTANCE = true;  // vkCreateInstance itself failed
+    constexpr FailedStep CREATE_INSTANCE =
+        FailedStep::CreateInstance;  // vkCreateInstance itself failed
     CHECK(retryWithoutValidation(CREATE_INSTANCE, VK_ERROR_LAYER_NOT_PRESENT, ValidationMode::On,
-                                 false));
+                                 Requirement::Optional));
     CHECK(retryWithoutValidation(CREATE_INSTANCE, VK_ERROR_LAYER_NOT_PRESENT, ValidationMode::Sync,
-                                 false));
+                                 Requirement::Optional));
     CHECK(retryWithoutValidation(CREATE_INSTANCE, VK_ERROR_OUT_OF_HOST_MEMORY, ValidationMode::On,
-                                 false));
+                                 Requirement::Optional));
     CHECK_FALSE(retryWithoutValidation(CREATE_INSTANCE, VK_ERROR_OUT_OF_HOST_MEMORY,
-                                       ValidationMode::On, true));
+                                       ValidationMode::On, Requirement::Required));
     CHECK_FALSE(retryWithoutValidation(CREATE_INSTANCE, VK_ERROR_LAYER_NOT_PRESENT,
-                                       ValidationMode::Sync, true));
+                                       ValidationMode::Sync, Requirement::Required));
     CHECK_FALSE(retryWithoutValidation(CREATE_INSTANCE, VK_ERROR_LAYER_NOT_PRESENT,
-                                       ValidationMode::Off, false));
+                                       ValidationMode::Off, Requirement::Optional));
     CHECK_FALSE(retryWithoutValidation(CREATE_INSTANCE, VK_ERROR_INCOMPATIBLE_DRIVER,
-                                       ValidationMode::On, false));
+                                       ValidationMode::On, Requirement::Optional));
     // A later step failed (creating the messenger): the instance exists, so it is not built again.
-    CHECK_FALSE(retryWithoutValidation(!CREATE_INSTANCE, VK_ERROR_OUT_OF_HOST_MEMORY,
-                                       ValidationMode::On, false));
+    CHECK_FALSE(retryWithoutValidation(FailedStep::AfterCreateInstance, VK_ERROR_OUT_OF_HOST_MEMORY,
+                                       ValidationMode::On, Requirement::Optional));
 }

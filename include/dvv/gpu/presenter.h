@@ -1,6 +1,6 @@
 #pragma once
 
-// Presentation to one native window (spec §4, §10.2): a Presenter runs its own thread that
+// Presentation to one native window: a Presenter runs its own thread that
 // acquires swapchain images, hands each frame's commands to the context's submit thread and
 // presents. One frame is in flight at a time.
 
@@ -27,20 +27,34 @@ class PresenterCore;
 struct Access;
 }  // namespace detail
 
+// What the present step does to the values of PresentFrame::image as it writes the window.
+// Linear: copies them as they are (the image holds display-encoded values). Srgb: applies the sRGB
+// transfer function (the image holds linear values). Fixed per swapchain. The values are those the
+// blit reads through the image's format: a *_SRGB image is decoded to linear first, so with Linear
+// the window gets linear values. Render into a UNORM (or float) image to control the encoding.
+enum class PresentEncoding : std::uint8_t { Linear, Srgb };
+
+// The per-call input of the frame provider. PresentFrameInfo: the 0.3.x name of
+// PresentFrameParams; the name PresentFrameInfo is deprecated (0.3.0) and removed in 1.0.0, which
+// also drops `format`.
 struct PresentFrameInfo {
     platform::PixelSize extent;  // swapchain extent: render at this size for a 1:1 blit
-    VkFormat format;             // swapchain format (informational; the blit converts)
-    std::uint64_t frameNumber;   // 0, 1, 2, ... per provider call
+    // Deprecated (0.3.0): use encoding; removed in 1.0.0.
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    std::uint64_t frameNumber;  // 0, 1, 2, ... per provider call
     // True only when the previous provider call's frame was submitted and completed (its record
     // function ran). False after a dropped frame, a provider error, and for the first call.
     bool previousFrameCompleted;
+    PresentEncoding encoding = PresentEncoding::Linear;  // appended in 0.3.0
 };
+using PresentFrameParams = PresentFrameInfo;
 
 // `image` is blitted to the swapchain image (linear scaling when sizes differ and the format has
 // SAMPLED_IMAGE_FILTER_LINEAR, else nearest). It must belong to this context, have TRANSFER_SRC
 // usage and a format with BLIT_SRC (e.g. R8G8B8A8_UNORM). `record` (may be empty) runs first in
 // the same submission. Both are released on the presenter thread once the submission has
 // completed.
+// Deprecated (0.3.0) through presenter.h: use presenter_vulkan.h; removed in 1.0.0.
 struct PresentFrame {
     RecordFunction record{};
     std::shared_ptr<GpuImage> image{};
@@ -51,9 +65,12 @@ struct PresentFrame {
 // the frame and goes to onError; Errc::DeviceLost, or any error on a lost context, fails the
 // presenter instead (failure(), one onError). The provider is called before the acquire: the
 // record function of a dropped frame is destroyed without running (see
-// PresentFrameInfo::previousFrameCompleted).
-using FrameProvider = MoveOnlyFunction<Result<PresentFrame>(const PresentFrameInfo&)>;
-// Called on the presenter thread; the GUI forwards it (e.g. wx CallAfter).
+// PresentFrameParams::previousFrameCompleted). The provider must never wait for the window's
+// thread and must never destroy the presenter.
+// Deprecated (0.3.0) through presenter.h: use presenter_vulkan.h; removed in 1.0.0.
+using FrameProvider = MoveOnlyFunction<Result<PresentFrame>(const PresentFrameParams&)>;
+// Called on the presenter thread; the GUI forwards it (e.g. wx CallAfter). Like the frame
+// provider, it must never wait for the window's thread and must never destroy the presenter.
 using PresenterErrorHandler = MoveOnlyFunction<void(const Error&) noexcept>;
 
 // A MetalWindow's CAMetalLayer: its owner (the GUI thread) sets the layer's frame and contentsScale
@@ -61,9 +78,13 @@ using PresenterErrorHandler = MoveOnlyFunction<void(const Error&) noexcept>;
 // bounds times contentsScale (also for fractional point bounds), i.e. the physical size passed here
 // and to resize().
 struct PresenterOptions {
+    // Deprecated (0.3.0): this field's type becomes dvv::platform::WindowHandle in 1.0.0.
     platform::NativeWindow window{};  // must outlive the presenter
     platform::PixelSize extent{};     // current client size in physical pixels (a hint)
     bool visible = true;
+    // Deprecated (0.3.0): use createPresenter's `frames` parameter (presenter_vulkan.h); removed
+    // in 1.0.0. That createPresenter refuses a provider here; only the deprecated
+    // ExecutionContext::createPresenter reads it.
     FrameProvider frames{};
     PresenterErrorHandler onError{};
     std::string name = "presenter";  // debug names and log lines
@@ -78,13 +99,12 @@ struct PresenterStats {
     bool failed = false;                    // stopped presenting; see failure()
 };
 
-// Presents to one native window on its own thread (spec §4): acquire, hand the frame's commands to
+// Presents to one native window on its own thread: acquire, hand the frame's commands to
 // the submit thread, present, recreate the swapchain on resize/out-of-date/suboptimal. Created by
-// ExecutionContext::createPresenter(); keeps the context alive. resize, setVisible, requestFrame
+// createPresenter (presenter_vulkan.h); keeps the context alive. resize, show, hide, requestFrame
 // and stats may be called from any thread.
-// On Windows: create and destroy the presenter on the window's thread. The frame provider and
-// onError must never wait for the window's thread and must never destroy the presenter. While a
-// presenter of this context lives, do not call ExecutionContext::drain() on the window's thread.
+// On Windows: create and destroy the presenter on the window's thread. While a presenter of this
+// context lives, do not call ExecutionContext::drain() on the window's thread.
 class Presenter final : public Managed<Presenter> {
 public:
     Presenter(CreationKey<ExecutionContext> key, std::shared_ptr<ExecutionContext> context,
@@ -95,8 +115,12 @@ public:
     ~Presenter();
 
     void resize(platform::PixelSize extent) noexcept;  // hint; latest wins; requests a frame
-    void setVisible(bool visible) noexcept;  // hidden: no frames, no acquires; requests a frame
-    void requestFrame() noexcept;            // coalesced until the next frame starts
+    void show() noexcept;                              // frames again; requests a frame
+    void hide() noexcept;                              // no frames, no acquires; requests a frame
+    // Deprecated (0.3.0): use show() or hide(); removed in 1.0.0. Calls show() when `visible`,
+    // hide() otherwise.
+    void setVisible(bool visible) noexcept;
+    void requestFrame() noexcept;  // coalesced until the next frame starts
     [[nodiscard]] PresenterStats stats() const;
     [[nodiscard]] std::optional<Error> failure() const;  // why presenting stopped
     [[nodiscard]] const std::shared_ptr<ExecutionContext>& context() const noexcept {

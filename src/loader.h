@@ -25,6 +25,10 @@ struct LoaderLibrary {
 // searched the usual way.
 [[nodiscard]] LoaderLibrary loaderLibrary(const std::string& library_name);
 
+// The system loader of this OS (no explicit name): defined in loader_win32.cpp,
+// loader_macos.cpp and loader_linux.cpp.
+[[nodiscard]] LoaderLibrary systemLoaderLibrary();
+
 // Loads the loader library (loaderLibrary(library_name)) and returns its vkGetInstanceProcAddr.
 // Errc::Unsupported "Vulkan loader not found" when the library or the function is missing. A loaded
 // library is never unloaded: vk-bootstrap keeps the first vkGetInstanceProcAddr it is given for the

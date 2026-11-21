@@ -1,20 +1,22 @@
 cmake_minimum_required(VERSION 4.2)
-project(dvv_gpu VERSION 0.2.1 DESCRIPTION "dvv GPU core" LANGUAGES CXX)
+project(dvv_gpu VERSION 0.3.0 DESCRIPTION "dvv GPU core" LANGUAGES CXX)
 # Version string; a pre-release build adds its release-stage label (user decision U-M4ORDER).
 set(dvv_gpu_VERSION_STRING "${PROJECT_VERSION}")
 
 # dvv-build provides the shared CMake modules and the dependency check (dvv-deps.txt); the dvv
 # presets set DVV_BUILD_CMAKE_DIR to its cmake folder.
 if(NOT DVV_BUILD_CMAKE_DIR OR NOT IS_ABSOLUTE "${DVV_BUILD_CMAKE_DIR}"
-   OR NOT EXISTS "${DVV_BUILD_CMAKE_DIR}/DvvDeps.cmake")
+   OR NOT EXISTS "${DVV_BUILD_CMAKE_DIR}/DvvDeps.cmake"
+   OR NOT EXISTS "${DVV_BUILD_CMAKE_DIR}/DvvOsSources.cmake")
     message(FATAL_ERROR "dvv_gpu: DVV_BUILD_CMAKE_DIR is not set, not absolute or "
-                        "has no DvvDeps.cmake (it must be dvv-build's cmake folder); configure "
-                        "with a dvv-build preset (e.g. `cmake --preset vs2026`, see README.md) "
-                        "or pass -DDVV_BUILD_CMAKE_DIR=<absolute path of dvv-build>/cmake")
+                        "has no DvvDeps.cmake or DvvOsSources.cmake (it must be dvv-build's cmake "
+                        "folder); configure with a dvv-build preset (e.g. `cmake --preset vs2026`, "
+                        "see README.md) or pass "
+                        "-DDVV_BUILD_CMAKE_DIR=<absolute path of dvv-build>/cmake")
 endif()
 include("${DVV_BUILD_CMAKE_DIR}/DvvDeps.cmake")
-# Adds dvv-base and dvv-platform (native windows, Vulkan surfaces, run-time libraries; dvv-deps.txt)
-# and checks their versions; a stand-alone build tests only this repository.
+# Adds dvv-base and dvv-platform (native windows, run-time libraries; dvv-deps.txt) and checks
+# their versions; a stand-alone build tests only this repository.
 dvv_dependencies()
 
 option(DVV_BUILD_TESTS "Build the dvv tests" ${PROJECT_IS_TOP_LEVEL})
@@ -43,8 +45,10 @@ find_path(DVV_VK_BOOTSTRAP_INCLUDE_DIR VkBootstrap.h
     PATHS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES include NO_DEFAULT_PATH REQUIRED)
 
 add_library(dvv_gpu STATIC
+    src/bundled_drivers.cpp
     src/command_recorder.cpp
     src/compute_pipeline.cpp
+    src/context_vulkan.cpp
     src/device_core.cpp
     src/devices.cpp
     src/execution_context.cpp
@@ -60,6 +64,7 @@ add_library(dvv_gpu STATIC
     src/resource_pool.cpp
     src/resources.cpp
     src/submitter.cpp
+    src/surface_vulkan.cpp
     src/vk_result.cpp
     src/vma.cpp
     "${DVV_VK_BOOTSTRAP_SOURCE}")
@@ -82,13 +87,17 @@ target_link_libraries(dvv_gpu
     PUBLIC dvv::base dvv::platform Vulkan::Headers
     PRIVATE $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>)
 dvv_set_compiler_options(dvv_gpu)
-# The presenter's stop waits while dispatching sent messages on Windows (design M1b §5.5, R15).
+include("${DVV_BUILD_CMAKE_DIR}/DvvOsSources.cmake")  # checked to exist at the top of the file
+dvv_os_sources(dvv_gpu src/loader src/surface_vulkan src/thread_wait)
 if(WIN32)
-    target_sources(dvv_gpu PRIVATE src/thread_wait_win32.cpp)
     target_link_libraries(dvv_gpu PRIVATE user32)
+elseif(NOT APPLE)
+    # Only the headers (Display, Window for VkXlibSurfaceCreateInfoKHR); nothing calls Xlib here.
+    find_package(X11 REQUIRED)
+    target_include_directories(dvv_gpu SYSTEM PRIVATE ${X11_INCLUDE_DIR})
 endif()
 
-# dvv-gpu-info: prints every Vulkan device the registry finds (text or --json).
+# dvv-gpu-info: prints every Vulkan device the GPU instance finds (text or --json).
 add_executable(dvv_gpu_info tools/dvv_gpu_info.cpp)
 set_target_properties(dvv_gpu_info PROPERTIES OUTPUT_NAME dvv-gpu-info)
 target_link_libraries(dvv_gpu_info PRIVATE dvv::gpu)

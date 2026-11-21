@@ -14,7 +14,7 @@
 #include "dvv/base/json.h"
 #include "dvv/base/log.h"
 #include "dvv/base/paths.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "pipeline_cache.h"
 #include "resource_pool_state.h"
 #include "submitter.h"
@@ -25,6 +25,30 @@ namespace dvv::gpu {
 static_assert(ManagedType<ExecutionContext>);
 
 namespace {
+
+// Retire slots a creator reserved (DeviceCore::reserveRetireSlots, §5.13): given back when the
+// creation fails, by a returned error or an exception, unless the created object took them over.
+class RetireSlotGuard {
+public:
+    RetireSlotGuard(detail::DeviceCore& core, std::size_t count) noexcept
+        : core_(&core), count_(count) {}
+    RetireSlotGuard(const RetireSlotGuard&) = delete;
+    RetireSlotGuard& operator=(const RetireSlotGuard&) = delete;
+    RetireSlotGuard(RetireSlotGuard&&) = delete;
+    RetireSlotGuard& operator=(RetireSlotGuard&&) = delete;
+    ~RetireSlotGuard() {
+        if (count_ > 0) {
+            core_->releaseRetireSlots(count_);
+        }
+    }
+
+    // The created object owns the slots now; its destructor retires its handles into them.
+    void dismiss() noexcept { count_ = 0; }
+
+private:
+    detail::DeviceCore* core_;
+    std::size_t count_;
+};
 
 // The bytes of push constants the shader's reflection (slangc -reflection-json) declares: the end
 // of its largest global push-constant block, 0 without one. Errc::Format when it cannot be read.
@@ -77,13 +101,13 @@ Result<std::vector<std::pair<std::uint32_t, std::uint32_t>>> reflectedDescriptor
 
 }  // namespace
 
-ExecutionContext::ExecutionContext(CreationKey<GpuRegistry> key,
-                                   std::shared_ptr<GpuRegistry> registry,
+ExecutionContext::ExecutionContext(CreationKey<GpuInstance> key,
+                                   std::shared_ptr<GpuInstance> gpu_instance,
                                    std::shared_ptr<detail::DeviceCore> core,
                                    std::unique_ptr<detail::PipelineCache> pipeline_cache,
                                    std::unique_ptr<detail::Submitter> submitter) noexcept
     : Managed(std::move(key)),
-      registry_(std::move(registry)),
+      registry_(std::move(gpu_instance)),
       core_(std::move(core)),
       pipeline_cache_(std::move(pipeline_cache)),
       submitter_(std::move(submitter)) {}
@@ -100,8 +124,7 @@ ExecutionContext::~ExecutionContext() {
     } else {
         try {
             if (const auto saved = pipeline_cache_->saveIfChanged(); !saved) {
-                DVV_LOG_ERROR("saving the pipeline cache of device {} failed: {}", core_->id(),
-                              saved.error().describe());
+                DVV_LOG_ERROR("device {}: {}", core_->id(), saved.error().describe());
             }
         } catch (const std::exception& error) {
             DVV_LOG_ERROR("saving the pipeline cache of device {} failed: {}", core_->id(),
@@ -161,6 +184,10 @@ Result<std::shared_ptr<ComputePipeline>> ExecutionContext::createComputePipeline
     if (core_->lost()) {
         return std::unexpected(core_->lostError());
     }
+    // The pipeline and its layout, and the set layout when images are bound.
+    const std::size_t slot_count = bindings.storageImages > 0 ? 3 : 2;
+    DVV_TRY_VOID(core_->reserveRetireSlots(slot_count));
+    RetireSlotGuard reserved_slots(*core_, slot_count);
     constexpr std::uint32_t SPIRV_MAGIC = 0x07230203;
     constexpr std::size_t SPIRV_HEADER_WORDS = 5;
     if (shader.spirv.size() < SPIRV_HEADER_WORDS || shader.spirv.front() != SPIRV_MAGIC) {
@@ -283,12 +310,14 @@ Result<std::shared_ptr<ComputePipeline>> ExecutionContext::createComputePipeline
         core_->setDebugName(set_layout, name);
     }
     try {
-        return std::make_shared<ComputePipeline>(
+        auto made = std::make_shared<ComputePipeline>(
             CreationKey<ExecutionContext>(
                 LifetimeRegistry::instance().issue<ComputePipeline>(objectId())),
             core_, std::move(name), static_cast<VkPipelineLayout>(layout.value),
             static_cast<VkPipeline>(pipeline.value), push_constant_size,
             static_cast<VkDescriptorSetLayout>(set_layout), bindings);
+        reserved_slots.dismiss();
+        return made;
     } catch (...) {
         device.destroyPipeline(pipeline.value, nullptr, dispatch);
         device.destroyPipelineLayout(layout.value, nullptr, dispatch);
@@ -337,6 +366,8 @@ Result<std::shared_ptr<GpuBuffer>> ExecutionContext::createBuffer(BufferDesc des
     if (core_->lost()) {
         return std::unexpected(core_->lostError());
     }
+    DVV_TRY_VOID(core_->reserveRetireSlots(1));
+    RetireSlotGuard reserved_slots(*core_, 1);
     if (desc.size == 0) {
         return makeError(Errc::Internal, std::format("buffer '{}': the size is zero", desc.name));
     }
@@ -381,10 +412,12 @@ Result<std::shared_ptr<GpuBuffer>> ExecutionContext::createBuffer(BufferDesc des
         vmaSetAllocationName(core_->allocator(), allocation, desc.name.c_str());
     }
     try {
-        return std::make_shared<GpuBuffer>(
+        auto made = std::make_shared<GpuBuffer>(
             CreationKey<ExecutionContext>(
                 LifetimeRegistry::instance().issue<GpuBuffer>(objectId())),
             core_, std::move(desc), buffer, allocation, address, mapped);
+        reserved_slots.dismiss();
+        return made;
     } catch (...) {
         vmaDestroyBuffer(core_->allocator(), buffer, allocation);
         throw;
@@ -395,6 +428,12 @@ Result<std::shared_ptr<GpuImage>> ExecutionContext::createImage(ImageDesc desc) 
     if (core_->lost()) {
         return std::unexpected(core_->lostError());
     }
+    // The image, and its view when it is a storage or sampled image.
+    const bool has_view =
+        (desc.usage & (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)) != 0;
+    const std::size_t slot_count = has_view ? 2 : 1;
+    DVV_TRY_VOID(core_->reserveRetireSlots(slot_count));
+    RetireSlotGuard reserved_slots(*core_, slot_count);
     if (desc.width == 0 || desc.height == 0 || desc.format == VK_FORMAT_UNDEFINED ||
         desc.usage == 0) {
         return makeError(
@@ -456,7 +495,7 @@ Result<std::shared_ptr<GpuImage>> ExecutionContext::createImage(ImageDesc desc) 
         vmaSetAllocationName(core_->allocator(), allocation, desc.name.c_str());
     }
     VkImageView view = VK_NULL_HANDLE;
-    if ((desc.usage & (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)) != 0) {
+    if (has_view) {
         const auto created = core_->device().createImageView(
             {.image = vk::Image(image),
              .viewType = vk::ImageViewType::e2D,
@@ -477,9 +516,11 @@ Result<std::shared_ptr<GpuImage>> ExecutionContext::createImage(ImageDesc desc) 
         }
     }
     try {
-        return std::make_shared<GpuImage>(
+        auto made = std::make_shared<GpuImage>(
             CreationKey<ExecutionContext>(LifetimeRegistry::instance().issue<GpuImage>(objectId())),
             core_, std::move(desc), image, allocation, view);
+        reserved_slots.dismiss();
+        return made;
     } catch (...) {
         if (view != VK_NULL_HANDLE) {
             core_->device().destroyImageView(vk::ImageView(view), nullptr, core_->dispatch());

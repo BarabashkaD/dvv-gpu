@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <string_view>
 
+#include "dvv/gpu/presenter.h"
 #include "vk.h"
 
 namespace dvv::gpu::detail {
@@ -49,6 +51,19 @@ namespace dvv::gpu::detail {
     }
     const std::string_view numeric = vk::componentNumericFormat(vk_format, 0);
     return numeric == "UNORM" || numeric == "SRGB";
+}
+
+// Srgb when a component of `format` has the SRGB numeric class (alpha stays UNORM, and
+// A8B8G8R8_SRGB_PACK32 lists it first), else Linear (the blit writes UNORM values unchanged).
+// Defined for every format presentBlitDestination accepts.
+[[nodiscard]] inline PresentEncoding presentEncoding(VkFormat format) noexcept {
+    const auto vk_format = static_cast<vk::Format>(format);
+    for (std::uint8_t component = 0; component < vk::componentCount(vk_format); ++component) {
+        if (std::string_view(vk::componentNumericFormat(vk_format, component)) == "SRGB") {
+            return PresentEncoding::Srgb;
+        }
+    }
+    return PresentEncoding::Linear;
 }
 
 }  // namespace dvv::gpu::detail

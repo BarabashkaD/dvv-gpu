@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <format>
 #include <iterator>
+#include <new>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -16,22 +17,22 @@
 
 namespace dvv::gpu::detail {
 
-Result<std::shared_ptr<DeviceCore>> DeviceCore::create(std::shared_ptr<const GpuRegistry> registry,
-                                                       const InstanceCore& instance,
-                                                       const PhysicalDevice& physical,
-                                                       const GpuInfo& info, bool presentation) {
+Result<std::shared_ptr<DeviceCore>> DeviceCore::create(
+    std::shared_ptr<const GpuInstance> gpu_instance, const InstanceCore& instance,
+    const PhysicalDevice& physical, const GpuInfo& info, const ContextOptions& options) {
     if (!info.usable() || !physical.universalQueueFamily) {
         return makeError(
             Errc::Unsupported,
             std::format("device {} ({}) does not meet the requirements", info.id, info.name));
     }
-    DVV_TRY(const std::vector<const char*> extensions, deviceExtensions(info, presentation));
+    DVV_TRY(const std::vector<const char*> extensions,
+            deviceExtensions(info, options.presentation));
     // Every member is set step by step; the destructor releases whatever exists when a step fails.
     auto core = std::make_shared<DeviceCore>();
-    core->registry_ = std::move(registry);
+    core->gpu_instance_ = std::move(gpu_instance);
     core->id_ = info.id;
     core->info_ = info;
-    core->presentation_ = presentation;
+    core->presentation_ = options.presentation;
     core->debug_utils_ = instance.debugUtils();
     core->physical_ = physical.handle;
     // The device is Vulkan 1.4, so the push-descriptor properties may be chained.
@@ -91,7 +92,8 @@ Result<std::shared_ptr<DeviceCore>> DeviceCore::create(std::shared_ptr<const Gpu
     core->setDebugName(core->queue_, label + " queue");
     core->setDebugName(core->timeline_, label + " timeline");
     DVV_LOG_INFO("Vulkan device created: {} ({}), Vulkan {}{}", info.name, info.id,
-                 formatVulkanVersion(info.apiVersion), presentation ? ", presentation" : "");
+                 formatVulkanVersion(info.apiVersion),
+                 options.presentation ? ", presentation" : "");
     return core;
 }
 
@@ -162,8 +164,41 @@ Error DeviceCore::lostError() const {
         .error();
 }
 
+Result<void> DeviceCore::reserveRetireSlots(std::size_t count) {
+    bool reserved = true;
+    {
+        const std::scoped_lock lock(retire_mutex_);
+        const std::size_t needed = slots_ + count;
+        if (needed > retired_.capacity()) {
+            try {
+                // Geometric, so a creator rarely grows the queue.
+                retired_.reserve(std::max(needed, 2 * retired_.capacity()));
+            } catch (const std::bad_alloc&) {
+                reserved = false;
+            }
+        }
+        if (reserved) {
+            slots_ = needed;
+        }
+    }
+    if (!reserved) {
+        // Built after the lock is released: the message allocates too.
+        return makeError(Errc::OutOfMemory, "reserving room in the retire queue: out of memory");
+    }
+    return {};
+}
+
+void DeviceCore::releaseRetireSlots(std::size_t count) noexcept {
+    const std::scoped_lock lock(retire_mutex_);
+    assert(count <= slots_ - retired_.size());  // only slots no retired handle uses
+    slots_ -= count;
+}
+
 void DeviceCore::retire(RetiredHandle handle, VmaAllocation allocation) noexcept {
     const std::scoped_lock lock(retire_mutex_);
+    // The creator reserved this slot (reserveRetireSlots), so the push never allocates.
+    assert(retired_.size() < retired_.capacity());
+    assert(retired_.size() < slots_);  // a slot was reserved, not only left over in the capacity
     // Tagged with the latest reserved submission: any work that used the handle was submitted, or
     // is being recorded, no later.
     retired_.push_back(
@@ -213,21 +248,39 @@ RetireStats DeviceCore::retireStats() const noexcept {
     return {.retiring = retired_.size(), .retired = retired_total_, .freed = freed_total_};
 }
 
+std::size_t DeviceCore::retireSlots() const noexcept {
+    const std::scoped_lock lock(retire_mutex_);
+    return slots_;
+}
+
+std::size_t DeviceCore::retireCapacity() const noexcept {
+    const std::scoped_lock lock(retire_mutex_);
+    return retired_.capacity();
+}
+
 std::size_t DeviceCore::freeRetired(std::uint64_t reached) noexcept {
-    std::vector<RetiredObject> ready;
-    {
-        const std::scoped_lock lock(retire_mutex_);
-        const auto done = std::ranges::stable_partition(
-            retired_,
-            [reached](const RetiredObject& object) { return object.timelineValue > reached; });
-        ready.assign(std::make_move_iterator(done.begin()), std::make_move_iterator(done.end()));
-        retired_.erase(done.begin(), done.end());
-        freed_total_ += ready.size();
+    // Compacted in place under the lock, so nothing is allocated on this noexcept path. Destroying
+    // is host-side freeing and takes no lock of this class; a concurrent retire() waits for it.
+    const std::scoped_lock lock(retire_mutex_);
+    // One pass in queue order: a ready object is destroyed (a view before its image, a pipeline
+    // before its layouts, as they were retired), the others move down in order.
+    auto kept_end = retired_.begin();
+    for (auto object = retired_.begin(); object != retired_.end(); ++object) {
+        if (object->timelineValue > reached) {
+            if (kept_end != object) {
+                *kept_end = *object;  // trivially copyable
+            }
+            ++kept_end;
+        } else {
+            destroy(*object);
+        }
     }
-    for (const RetiredObject& object : ready) {
-        destroy(object);
-    }
-    return ready.size();
+    const auto freed = static_cast<std::size_t>(std::distance(kept_end, retired_.end()));
+    retired_.erase(kept_end, retired_.end());
+    assert(freed <= slots_);
+    slots_ -= freed;
+    freed_total_ += freed;
+    return freed;
 }
 
 void DeviceCore::destroy(const RetiredObject& object) const noexcept {

@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -20,8 +21,10 @@
 #include "device_core.h"
 #include "dvv/base/error.h"
 #include "dvv/base/log.h"
+#include "dvv/base/utf8.h"
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/compute_pipeline.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "gpu_fixture.h"
 #include "pipeline_cache.h"
@@ -30,6 +33,7 @@
 using dvv::gpu::CommandRecorder;
 using dvv::gpu::ComputePipeline;
 using dvv::gpu::ContextOptions;
+using dvv::gpu::GroupCount;
 using dvv::gpu::detail::Access;
 using dvv::gpu::detail::PIPELINE_CACHE_TRAILER_SIZE;
 using dvv::gpu::test::CapturedLog;
@@ -54,11 +58,6 @@ void writeFile(const std::filesystem::path& file, std::span<const std::byte> dat
     stream.write(reinterpret_cast<const char*>(data.data()),
                  static_cast<std::streamsize>(data.size()));
     REQUIRE(stream.good());
-}
-
-std::string utf8(const std::filesystem::path& path) {
-    const std::u8string text = path.u8string();
-    return {reinterpret_cast<const char*>(text.data()), text.size()};
 }
 
 // The driver's data of a pipeline cache file (checked: it has a matching dvv trailer).
@@ -127,7 +126,7 @@ bool driverKeepsPipelineCaches(const dvv::gpu::detail::DeviceCore& core) {
 
 TEST_CASE_FIXTURE(GpuTest, "a compute pipeline is made from an embedded shader") {
     auto pipeline =
-        context().createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
+        createComputePipeline(context(), test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
     CHECK(pipeline->name() == "add_one");
     CHECK(pipeline->pushConstantSize() == PUSH_CONSTANT_SIZE);
     CHECK(pipeline->handle() != VK_NULL_HANDLE);
@@ -146,7 +145,7 @@ TEST_CASE_FIXTURE(GpuTest, "a compute pipeline is made from an embedded shader")
 
 TEST_CASE_FIXTURE(GpuTest, "pipelines that cannot be made are reported") {
     const dvv::gpu::EmbeddedShader empty{.name = "empty"};
-    const auto no_code = context().createComputePipeline(empty, 0);
+    const auto no_code = createComputePipeline(context(), empty, 0);
     REQUIRE_FALSE(no_code.has_value());
     CHECK(no_code.error().code == dvv::Errc::Internal);
     CHECK(no_code.error().message == "shader 'empty' is not SPIR-V");
@@ -154,18 +153,18 @@ TEST_CASE_FIXTURE(GpuTest, "pipelines that cannot be made are reported") {
     // Only the magic number: shorter than the SPIR-V header.
     const dvv::gpu::EmbeddedShader magic_only{.name = "magic_only",
                                               .spirv = test_shaders::addOne().spirv.first(1)};
-    const auto short_code = context().createComputePipeline(magic_only, 0);
+    const auto short_code = createComputePipeline(context(), magic_only, 0);
     REQUIRE_FALSE(short_code.has_value());
     CHECK(short_code.error().code == dvv::Errc::Internal);
     CHECK(short_code.error().message == "shader 'magic_only' is not SPIR-V");
 
-    const auto unaligned = context().createComputePipeline(test_shaders::addOne(), 6);
+    const auto unaligned = createComputePipeline(context(), test_shaders::addOne(), 6);
     REQUIRE_FALSE(unaligned.has_value());
     CHECK(unaligned.error().code == dvv::Errc::Internal);
 
     // The range must cover the shader's 16-byte push-constant block (from its reflection).
     for (const std::uint32_t size : {0U, 8U}) {
-        const auto too_small = context().createComputePipeline(test_shaders::addOne(), size);
+        const auto too_small = createComputePipeline(context(), test_shaders::addOne(), size);
         REQUIRE_FALSE(too_small.has_value());
         CHECK(too_small.error().code == dvv::Errc::Internal);
         CHECK(too_small.error().message ==
@@ -174,31 +173,32 @@ TEST_CASE_FIXTURE(GpuTest, "pipelines that cannot be made are reported") {
 
     dvv::gpu::EmbeddedShader broken = test_shaders::addOne();
     broken.reflectionJson = "{\"parameters\": [";
-    const auto unreadable = context().createComputePipeline(broken, PUSH_CONSTANT_SIZE);
+    const auto unreadable = createComputePipeline(context(), broken, PUSH_CONSTANT_SIZE);
     REQUIRE_FALSE(unreadable.has_value());
     CHECK(unreadable.error().code == dvv::Errc::Format);
     CHECK(unreadable.error().message.starts_with(
         "shader 'add_one': its reflection cannot be read: "));
 
-    const auto too_large = context().createComputePipeline(test_shaders::addOne(), 1U << 16U);
+    const auto too_large = createComputePipeline(context(), test_shaders::addOne(), 1U << 16U);
     REQUIRE_FALSE(too_large.has_value());
     CHECK(too_large.error().code == dvv::Errc::Unsupported);
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a dispatch checks its pipeline, push constants and group counts") {
     const auto pipeline =
-        context().createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
+        createComputePipeline(context(), test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
     const std::byte push_constants[PUSH_CONSTANT_SIZE]{};
 
     const auto short_push = submitAndWait([&](CommandRecorder& recorder) {
-        recorder.dispatch(*pipeline, std::span(push_constants).first(8), 1);
+        recorder.dispatch(*pipeline, std::span(push_constants).first(8), GroupCount{1});
     });
     REQUIRE_FALSE(short_push.has_value());
     CHECK(short_push.error().message ==
           "dispatch: pipeline 'add_one' takes 16 bytes of push constants, not 8");
 
-    const auto no_groups = submitAndWait(
-        [&](CommandRecorder& recorder) { recorder.dispatch(*pipeline, push_constants, 0); });
+    const auto no_groups = submitAndWait([&](CommandRecorder& recorder) {
+        recorder.dispatch(*pipeline, push_constants, GroupCount{0});
+    });
     REQUIRE_FALSE(no_groups.has_value());
     CHECK(no_groups.error().message.starts_with(
         "dispatch: the group counts 0x1x1 must be at least 1 and at most "));
@@ -214,7 +214,7 @@ TEST_CASE_FIXTURE(GpuTest, "a dispatch checks its pipeline, push constants and g
         std::uint32_t counts[3]{1, 1, 1};
         counts[axis] = limit[axis] + 1;
         const auto too_many_groups = submitAndWait([&](CommandRecorder& recorder) {
-            recorder.dispatch(*pipeline, push_constants, counts[0], counts[1], counts[2]);
+            recorder.dispatch(*pipeline, push_constants, {counts[0], counts[1], counts[2]});
         });
         REQUIRE_FALSE(too_many_groups.has_value());
         CHECK(too_many_groups.error().message.starts_with(
@@ -224,11 +224,12 @@ TEST_CASE_FIXTURE(GpuTest, "a dispatch checks its pipeline, push constants and g
         MESSAGE("every group-count limit is the largest 32-bit value: nothing to refuse");
     }
 
-    auto other = registry().createContext(device()).value();
+    auto other = gpuInstance().createContext(device()).value();
     const auto foreign =
-        other->createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
-    const auto device_check = submitAndWait(
-        [&](CommandRecorder& recorder) { recorder.dispatch(*foreign, push_constants, 1); });
+        createComputePipeline(*other, test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
+    const auto device_check = submitAndWait([&](CommandRecorder& recorder) {
+        recorder.dispatch(*foreign, push_constants, GroupCount{1});
+    });
     REQUIRE_FALSE(device_check.has_value());
     CHECK(device_check.error().message == "dispatch: pipeline 'add_one' belongs to another device");
 }
@@ -238,11 +239,12 @@ TEST_CASE_FIXTURE(GpuTest, "the pipeline cache is saved and loaded again") {
     // A name outside every single-byte code page: paths reach the log as UTF-8.
     const std::filesystem::path file = folder.path() / u8"кэш-キャッシュ" / "pipelines.bin";
     {
-        auto ctx =
-            registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
+        auto ctx = gpuInstance()
+                       .createContext(device(), ContextOptions{.pipelineCacheFile = file})
+                       .value();
         CHECK_FALSE(Access::pipelineCache(*ctx).loaded());  // no file yet
         const auto pipeline =
-            ctx->createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
+            createComputePipeline(*ctx, test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
         REQUIRE(ctx->savePipelineCache().has_value());
         REQUIRE(std::filesystem::exists(file));
         const std::vector<std::byte> saved = driverData(readFile(file));
@@ -261,19 +263,21 @@ TEST_CASE_FIXTURE(GpuTest, "the pipeline cache is saved and loaded again") {
 
     {
         const CapturedLog log(dvv::LogLevel::Info);
-        auto loaded =
-            registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
+        auto loaded = gpuInstance()
+                          .createContext(device(), ContextOptions{.pipelineCacheFile = file})
+                          .value();
         CHECK(Access::pipelineCache(*loaded).loaded());
-        CHECK(log.contains("pipeline cache loaded from " + utf8(file)));
+        CHECK(log.contains("pipeline cache loaded from " + dvv::pathDisplayText(file)));
         CHECK(
-            loaded->createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).has_value());
+            createComputePipeline(*loaded, test_shaders::addOne(), PUSH_CONSTANT_SIZE).has_value());
     }
 
     // Nothing compiled: closing does not write the file again.
     const std::vector<std::byte> marker(8, std::byte{0x2a});
     {
-        auto unchanged =
-            registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
+        auto unchanged = gpuInstance()
+                             .createContext(device(), ContextOptions{.pipelineCacheFile = file})
+                             .value();
         CHECK(Access::pipelineCache(*unchanged).loaded());
         writeFile(file, marker);
     }
@@ -283,7 +287,7 @@ TEST_CASE_FIXTURE(GpuTest, "the pipeline cache is saved and loaded again") {
 TEST_CASE_FIXTURE(GpuTest, "a corrupt, damaged or foreign pipeline cache file is ignored") {
     const TemporaryDirectory folder;
     const std::filesystem::path file = folder.path() / "pipelines.bin";
-    const std::string ignored = "pipeline cache " + utf8(file) + " ignored: ";
+    const std::string ignored = "pipeline cache " + dvv::pathDisplayText(file) + " ignored: ";
     const CapturedLog log(dvv::LogLevel::Warn);
     {
         std::ofstream stream(file, std::ios::binary);
@@ -292,11 +296,12 @@ TEST_CASE_FIXTURE(GpuTest, "a corrupt, damaged or foreign pipeline cache file is
     std::vector<std::byte> saved;
     bool keeps = true;
     {
-        auto ctx =
-            registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
+        auto ctx = gpuInstance()
+                       .createContext(device(), ContextOptions{.pipelineCacheFile = file})
+                       .value();
         CHECK_FALSE(Access::pipelineCache(*ctx).loaded());
         CHECK(log.contains(ignored + "it has no dvv trailer"));
-        CHECK(ctx->createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).has_value());
+        CHECK(createComputePipeline(*ctx, test_shaders::addOne(), PUSH_CONSTANT_SIZE).has_value());
         REQUIRE(ctx->savePipelineCache().has_value());  // replaces the corrupt file
         saved = driverData(readFile(file));
         keeps = driverKeepsPipelineCaches(Access::core(*ctx));
@@ -320,11 +325,12 @@ TEST_CASE_FIXTURE(GpuTest, "a corrupt, damaged or foreign pipeline cache file is
     damaged[saved.size() - 1] ^= std::byte{0x01};
     writeFile(file, damaged);
     {
-        auto ctx =
-            registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
+        auto ctx = gpuInstance()
+                       .createContext(device(), ContextOptions{.pipelineCacheFile = file})
+                       .value();
         CHECK_FALSE(Access::pipelineCache(*ctx).loaded());
         CHECK(log.contains(ignored + "the data does not match the checksum of its dvv trailer"));
-        CHECK(ctx->createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).has_value());
+        CHECK(createComputePipeline(*ctx, test_shaders::addOne(), PUSH_CONSTANT_SIZE).has_value());
     }
 
     // A well-formed cache of another vendor: this device's cache with a changed vendorID.
@@ -333,10 +339,10 @@ TEST_CASE_FIXTURE(GpuTest, "a corrupt, damaged or foreign pipeline cache file is
     dvv::gpu::detail::appendPipelineCacheTrailer(foreign);
     writeFile(file, foreign);
     auto ctx =
-        registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
+        gpuInstance().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
     CHECK_FALSE(Access::pipelineCache(*ctx).loaded());
     CHECK(log.contains(ignored + "it was written for device"));
-    CHECK(ctx->createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).has_value());
+    CHECK(createComputePipeline(*ctx, test_shaders::addOne(), PUSH_CONSTANT_SIZE).has_value());
 }
 
 TEST_CASE_FIXTURE(GpuTest, "concurrent saves to one pipeline cache file leave a complete file") {
@@ -345,10 +351,11 @@ TEST_CASE_FIXTURE(GpuTest, "concurrent saves to one pipeline cache file leave a 
     std::shared_ptr<dvv::gpu::ExecutionContext> contexts[2];
     std::shared_ptr<ComputePipeline> pipelines[2];
     for (std::size_t i = 0; i < 2; ++i) {
-        contexts[i] =
-            registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
+        contexts[i] = gpuInstance()
+                          .createContext(device(), ContextOptions{.pipelineCacheFile = file})
+                          .value();
         pipelines[i] =
-            contexts[i]->createComputePipeline(test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
+            createComputePipeline(*contexts[i], test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
     }
     constexpr int SAVES = 25;
     int failed[2] = {0, 0};
@@ -373,6 +380,43 @@ TEST_CASE_FIXTURE(GpuTest, "concurrent saves to one pipeline cache file leave a 
         CHECK(dvv::gpu::detail::pipelineCacheMismatch(
                   saved, identityOf(Access::core(*contexts[0]))) == std::nullopt);
     }
+}
+
+TEST_CASE_FIXTURE(GpuTest, "a pipeline cache path that is a symbolic link is not replaced") {
+    const TemporaryDirectory folder;
+    const std::filesystem::path real = folder.path() / "real.bin";
+    const std::filesystem::path link = folder.path() / "cache.bin";
+    const std::vector<std::byte> one_byte(1, std::byte{'x'});
+    writeFile(real, one_byte);
+    std::error_code link_error;
+    std::filesystem::create_symlink(real, link, link_error);
+#if defined(_WIN32)
+    // Creating a symbolic link needs developer mode or the symbolic-link privilege on Windows.
+    if (link_error) {
+        MESSAGE("skipped: no symbolic link can be created here (" << link_error.message() << ")");
+        return;
+    }
+#else
+    REQUIRE_FALSE(link_error);
+#endif
+    {
+        auto ctx = gpuInstance()
+                       .createContext(device(), ContextOptions{.pipelineCacheFile = link})
+                       .value();
+        const auto pipeline =
+            createComputePipeline(*ctx, test_shaders::addOne(), PUSH_CONSTANT_SIZE).value();
+        const auto saved = ctx->savePipelineCache();
+        REQUIRE_FALSE(saved.has_value());
+        CHECK(saved.error().code == dvv::Errc::Io);
+        CHECK(saved.error().message.starts_with("saving the pipeline cache failed: "));
+        CHECK(saved.error().message.find("failed: not a regular file") != std::string::npos);
+        CHECK(std::filesystem::is_symlink(link));
+        CHECK(readFile(real) == one_byte);
+        CHECK(temporaryFiles(folder.path()) == 0);
+    }  // closing the context tries to save again and logs the failure
+    CHECK(std::filesystem::is_symlink(link));
+    CHECK(readFile(real) == one_byte);
+    CHECK(temporaryFiles(folder.path()) == 0);
 }
 
 TEST_CASE_FIXTURE(GpuTest, "without a file the pipeline cache stays in memory") {

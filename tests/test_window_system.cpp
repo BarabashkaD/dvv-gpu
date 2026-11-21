@@ -7,11 +7,11 @@
 #include <vector>
 
 #include "dvv/base/error.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/platform/native_window.h"
 #include "instance.h"
 
-using dvv::gpu::GpuRegistryOptions;
+using dvv::gpu::GpuInstanceOptions;
 using dvv::gpu::detail::requireInstanceExtensions;
 using dvv::gpu::detail::windowSystemExtensions;
 using dvv::platform::WindowSystem;
@@ -30,8 +30,8 @@ vk::ExtensionProperties extension(std::string_view name) {
 
 }  // namespace
 
-TEST_CASE("a headless registry asks for no surface extensions") {
-    CHECK(windowSystemExtensions(GpuRegistryOptions{}).empty());
+TEST_CASE("a headless GPU instance asks for no surface extensions") {
+    CHECK(windowSystemExtensions(GpuInstanceOptions{}).empty());
 }
 
 TEST_CASE("a window system adds VK_KHR_surface and its platform extension") {

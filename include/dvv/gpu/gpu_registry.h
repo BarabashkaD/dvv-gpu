@@ -1,5 +1,7 @@
 #pragma once
 
+// Deprecated (0.3.0): use dvv/gpu/gpu_instance.h; removed in 1.0.0.
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -13,7 +15,7 @@
 #include "dvv/gpu/device_id.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_info.h"
-#include "dvv/platform/native_window.h"
+#include "dvv/platform/window_handle.h"
 
 namespace dvv::gpu {
 
@@ -27,6 +29,8 @@ enum class ValidationMode : std::uint8_t { Off, On, Sync };
 
 [[nodiscard]] std::string_view validationModeName(ValidationMode mode) noexcept;
 
+// The options of GpuInstance::create(). GpuRegistryOptions: the 0.3.x name of GpuInstanceOptions;
+// the name GpuRegistryOptions is deprecated (0.3.0) and removed in 1.0.0.
 struct GpuRegistryOptions {
     std::string applicationName = "dvv";
     // Unset: the environment variable DVV_VK_VALIDATION (off, on or sync); without it On in Debug
@@ -36,16 +40,19 @@ struct GpuRegistryOptions {
     // Unset: DVV_VK_VALIDATION_REQUIRED (1 or 0, default 0). When true, a requested validation
     // layer that is not installed is an error (Errc::Unsupported); used by CI.
     std::optional<bool> validationRequired = std::nullopt;
-    // Set: the instance also enables platform::surfaceInstanceExtensions(*windowSystem), so
-    // contexts can present (ContextOptions::presentation); Errc::Unsupported when the loader lacks
-    // them. Unset: headless.
+    // Set: the instance also enables the window system's surface extensions, so contexts can
+    // present (ContextOptions::presentation); Errc::Unsupported when the loader lacks them. Unset:
+    // headless.
     std::optional<platform::WindowSystem> windowSystem = std::nullopt;
 };
 
-// The process's Vulkan instance (spec §5.2): loads the Vulkan loader at run time, creates an
-// instance (Vulkan 1.4 API on a loader of at least 1.3; headless unless options.windowSystem is
-// set), routes debug messages to the dvv Logger, and records and ranks the physical devices. Its
-// own creation authority; thread-safe.
+using GpuInstanceOptions = GpuRegistryOptions;
+
+// The process's Vulkan instance: loads the Vulkan loader at run time, creates an instance (Vulkan
+// 1.4 API on a loader of at least 1.3; headless unless options.windowSystem is set), routes debug
+// messages to the dvv Logger, and records and ranks the physical devices. Its own creation
+// authority; thread-safe. GpuRegistry: the 0.3.x name of GpuInstance; the name GpuRegistry is
+// deprecated (0.3.0) and removed in 1.0.0.
 class GpuRegistry final : public Managed<GpuRegistry>,
                           public std::enable_shared_from_this<GpuRegistry> {
 public:
@@ -53,8 +60,8 @@ public:
     // loader is older than 1.3, lacks a surface extension of options.windowSystem, or a required
     // validation layer is missing; Errc::Format for a bad DVV_VK_VALIDATION or
     // DVV_VK_VALIDATION_REQUIRED value. A required layer that is listed but whose library does not
-    // load fails as the loader reports it: Errc::Unsupported on Linux, Errc::OutOfMemory on Windows
-    // (spec §11).
+    // load fails as the loader reports it: Errc::Unsupported on Linux, Errc::OutOfMemory on
+    // Windows.
     [[nodiscard]] static Result<std::shared_ptr<GpuRegistry>> create(
         const GpuRegistryOptions& options = {});
 
@@ -69,7 +76,7 @@ public:
     [[nodiscard]] std::uint64_t validationMessageCount() const noexcept;
     // Version of the Vulkan loader (VK_MAKE_API_VERSION encoding).
     [[nodiscard]] std::uint32_t loaderVersion() const noexcept;
-    // The window system the instance was created for; nullopt for a headless registry.
+    // The window system the instance was created for; nullopt for a headless GPU instance.
     [[nodiscard]] std::optional<platform::WindowSystem> windowSystem() const noexcept;
 
     // Every physical device in enumeration order: devices()[id.index()].
@@ -79,10 +86,10 @@ public:
     // The best device that meets the requirements; nullopt when none does.
     [[nodiscard]] std::optional<DeviceId> bestDevice() const noexcept;
 
-    // A context on one device (spec §5.2). Errc::Internal for an id that does not exist or for
-    // ContextOptions::presentation on a headless registry, Errc::Unsupported for a device that
-    // misses requirements (or VK_KHR_swapchain for presentation); Vulkan errors as converted by
-    // dvv-gpu (e.g. OutOfMemory).
+    // A context on one device. Errc::Internal for an id that does not exist or for
+    // ContextOptions::presentation on a headless GPU instance, Errc::Unsupported for a device
+    // that misses requirements (or VK_KHR_swapchain for presentation); Vulkan errors as converted
+    // by dvv-gpu (e.g. OutOfMemory).
     [[nodiscard]] Result<std::shared_ptr<ExecutionContext>> createContext(
         DeviceId id, const ContextOptions& options = {});
 

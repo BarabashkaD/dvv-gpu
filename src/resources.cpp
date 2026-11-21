@@ -1,7 +1,10 @@
 #include "dvv/gpu/resources.h"
 
+#include <cstdint>
+#include <string_view>
 #include <utility>
 
+#include "access.h"
 #include "device_core.h"
 #include "vk_result.h"
 
@@ -9,6 +12,24 @@ namespace dvv::gpu {
 
 static_assert(ManagedType<GpuBuffer>);
 static_assert(ManagedType<GpuImage>);
+
+namespace {
+
+// The body of GpuBuffer::flush(), shared with MappedWrite::flush().
+Result<void> flushAllocation(detail::DeviceCore& core, VmaAllocation_T* allocation,
+                             std::uint64_t offset, std::uint64_t size) {
+    return detail::vkCheck(vmaFlushAllocation(core.allocator(), allocation, offset, size),
+                           "vmaFlushAllocation");
+}
+
+// The body of GpuBuffer::invalidate(), shared with mapRead().
+Result<void> invalidateAllocation(detail::DeviceCore& core, VmaAllocation_T* allocation,
+                                  std::uint64_t offset, std::uint64_t size) {
+    return detail::vkCheck(vmaInvalidateAllocation(core.allocator(), allocation, offset, size),
+                           "vmaInvalidateAllocation");
+}
+
+}  // namespace
 
 GpuBuffer::GpuBuffer(CreationKey<ExecutionContext> key, std::shared_ptr<detail::DeviceCore> core,
                      BufferDesc desc, VkBuffer buffer, VmaAllocation_T* allocation,
@@ -27,14 +48,64 @@ GpuBuffer::~GpuBuffer() {
     core_->collect();
 }
 
+MappedWrite::MappedWrite(GpuBuffer& buffer, std::span<std::byte> mapped_bytes) noexcept
+    : buffer_(&buffer), bytes_(mapped_bytes) {}
+
+MappedWrite::MappedWrite(MappedWrite&& other) noexcept
+    : buffer_(std::exchange(other.buffer_, nullptr)), bytes_(std::exchange(other.bytes_, {})) {}
+
+MappedWrite& MappedWrite::operator=(MappedWrite&& other) noexcept {
+    if (this != &other) {
+        buffer_ = std::exchange(other.buffer_, nullptr);
+        bytes_ = std::exchange(other.bytes_, {});
+    }
+    return *this;
+}
+
+std::span<std::byte> MappedWrite::bytes() const noexcept {
+    return bytes_;
+}
+
+Result<void> MappedWrite::flush(std::uint64_t offset, std::uint64_t size) {
+    if (buffer_ == nullptr || bytes_.empty()) {
+        return {};  // moved from, or a DeviceOnly buffer
+    }
+    return flushAllocation(detail::Access::core(*buffer_), detail::Access::allocation(*buffer_),
+                           offset, size);
+}
+
+MappedRead::MappedRead(std::span<const std::byte> mapped_bytes) noexcept : bytes_(mapped_bytes) {}
+
+MappedRead::MappedRead(MappedRead&& other) noexcept : bytes_(std::exchange(other.bytes_, {})) {}
+
+MappedRead& MappedRead::operator=(MappedRead&& other) noexcept {
+    if (this != &other) {
+        bytes_ = std::exchange(other.bytes_, {});
+    }
+    return *this;
+}
+
+std::span<const std::byte> MappedRead::bytes() const noexcept {
+    return bytes_;
+}
+
+MappedWrite GpuBuffer::mapWrite() noexcept {
+    return {*this, mapped_};
+}
+
+Result<MappedRead> GpuBuffer::mapRead() const {
+    if (!mapped_.empty()) {
+        DVV_TRY_VOID(invalidateAllocation(*core_, allocation_, 0, VK_WHOLE_SIZE));
+    }
+    return MappedRead(mapped_);
+}
+
 Result<void> GpuBuffer::flush(std::uint64_t offset, std::uint64_t size) {
-    return detail::vkCheck(vmaFlushAllocation(core_->allocator(), allocation_, offset, size),
-                           "vmaFlushAllocation");
+    return flushAllocation(*core_, allocation_, offset, size);
 }
 
 Result<void> GpuBuffer::invalidate(std::uint64_t offset, std::uint64_t size) {
-    return detail::vkCheck(vmaInvalidateAllocation(core_->allocator(), allocation_, offset, size),
-                           "vmaInvalidateAllocation");
+    return invalidateAllocation(*core_, allocation_, offset, size);
 }
 
 DeviceId GpuBuffer::deviceId() const noexcept {
@@ -59,6 +130,10 @@ GpuImage::~GpuImage() {
     }
     core_->retire(vk::Image(image_), allocation_);
     core_->collect();
+}
+
+std::string_view GpuImage::name() const noexcept {
+    return desc_.name;
 }
 
 DeviceId GpuImage::deviceId() const noexcept {

@@ -1,6 +1,6 @@
 #pragma once
 
-// A shader compiled at build time by dvv_add_shaders() (spec §5.4, §13.2).
+// A shader compiled at build time by dvv_add_shaders().
 
 #include <cstdint>
 #include <span>

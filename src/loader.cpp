@@ -34,17 +34,7 @@ LoaderLibrary loaderLibrary(const std::string& library_name) {
     if (!library_name.empty()) {
         return {.name = library_name, .search = platform::LibrarySearch::Default};
     }
-#if defined(_WIN32)
-    // Only from the system directory: a vulkan-1.dll next to the executable, in the current
-    // directory or on PATH is not found (an already loaded module of that name is used as is).
-    return {.name = "vulkan-1.dll", .search = platform::LibrarySearch::SystemDirectory};
-#elif defined(__APPLE__)
-    // Only through the executable's LC_RPATH (no system folder holds a Vulkan loader on macOS):
-    // CMAKE_BUILD_RPATH in a build tree, @executable_path/../Frameworks in the app.
-    return {.name = "@rpath/libvulkan.1.dylib", .search = platform::LibrarySearch::Default};
-#else
-    return {.name = "libvulkan.so.1", .search = platform::LibrarySearch::SystemDirectory};
-#endif
+    return systemLoaderLibrary();
 }
 
 Result<PFN_vkGetInstanceProcAddr> loadVulkanLoader(const std::string& library_name) {
