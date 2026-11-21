@@ -1,6 +1,6 @@
 #pragma once
 
-// Compute pipelines (spec §5.4).
+// Compute pipelines.
 
 #include <cstdint>
 #include <memory>
@@ -20,7 +20,7 @@ class DeviceCore;
 struct Access;
 }  // namespace detail
 
-// The descriptors a compute pipeline binds (spec §5.4 as changed by M2 D6): storage images in
+// The descriptors a compute pipeline binds: storage images in
 // set 0, bindings 0..storageImages-1, pushed per dispatch
 // (VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT). Pipelines without bindings have no
 // descriptor set at all.
@@ -31,7 +31,7 @@ struct ComputeBindings {
 
 // A compute pipeline made from an EmbeddedShader (entry point main), a push-constant range of a
 // given size and its ComputeBindings (shaders receive buffers by device address, storage images
-// through push descriptors). Created by ExecutionContext::createComputePipeline() with the
+// through push descriptors). Created by createComputePipeline() (context_vulkan.h) with the
 // context's pipeline cache. Like a resource, the destructor hands the pipeline and its layouts to
 // the retire queue, so a pipeline may be released while the GPU still runs it.
 class ComputePipeline final : public Managed<ComputePipeline> {

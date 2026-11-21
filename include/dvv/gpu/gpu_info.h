@@ -16,7 +16,7 @@ enum class DeviceType : std::uint8_t { Other, IntegratedGpu, DiscreteGpu, Virtua
 // "discrete GPU", "integrated GPU", "virtual GPU", "CPU" or "other".
 [[nodiscard]] std::string_view deviceTypeName(DeviceType type) noexcept;
 
-// Used when present (spec §5.1); a device without them is still usable.
+// Used when present; a device without them is still usable.
 struct OptionalFeatures {
     bool shaderInt16 = false;
     bool shaderFloat16 = false;
@@ -25,7 +25,7 @@ struct OptionalFeatures {
     bool swapchain = false;     // VK_KHR_swapchain (device extension; ContextOptions::presentation)
 };
 
-// One physical device as the GpuRegistry found it.
+// One physical device as the GpuInstance found it.
 struct GpuInfo {
     DeviceId id{0};
     std::string name{};
@@ -38,7 +38,7 @@ struct GpuInfo {
     std::string driverInfo{};         // usually the driver's own version text
     std::array<std::uint8_t, 16> deviceUuid{};
     std::uint64_t deviceLocalMemoryBytes = 0;  // sum of the device-local heaps
-    // Requirements of spec §5.1 the device does not meet ("Vulkan 1.4", feature names, ...); empty
+    // Requirements the device does not meet ("Vulkan 1.4", feature names, ...); empty
     // when the device is usable.
     std::vector<std::string> missingRequirements{};
     OptionalFeatures optional{};

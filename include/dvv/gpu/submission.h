@@ -1,6 +1,6 @@
 #pragma once
 
-// The awaitable of ExecutionContext::submit() (spec §4).
+// The awaitable of submit() (context_vulkan.h).
 
 #include <coroutine>
 #include <cstdint>
@@ -18,7 +18,7 @@ class ExecutionContext;
 // The record function of a submission; runs on the context's submit thread.
 using RecordFunction = MoveOnlyFunction<void(CommandRecorder&)>;
 
-// co_await ctx->submit(executor, record) hands the record function to the submit thread, which
+// co_await submit(*ctx, executor, record) hands the record function to the submit thread, which
 // records and submits it; the waiter thread waits until the GPU has finished, releases the record
 // function on the executor and resumes the awaiting coroutine there (never inline). The result is
 // the submission's timeline value, or the error that stopped it (recording, submission or the

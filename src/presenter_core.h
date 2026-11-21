@@ -2,10 +2,10 @@
 
 // The thread behind a Presenter (design M1b §5): surface, swapchain, acquire fence and the loop
 // that executes PresenterLogic's actions. An internal part of Presenter (spec §9.4: exempt, owned
-// only by its Presenter, created only by ExecutionContext::createPresenter()).
+// only by its Presenter, created only by ExecutionContext::makePresenter()).
 //
 // Threads: the presenter thread owns every Vulkan object here and the logic; the GUI thread only
-// sets the request block (resize, setVisible, requestFrame) and reads stats and failure; the
+// sets the request block (resize, show, hide, requestFrame) and reads stats and failure; the
 // context's waiter thread posts frame completions into the mailbox. The request block, mailbox,
 // stats and failure are guarded by one mutex. No Vulkan call is made under it.
 
@@ -25,6 +25,7 @@
 #include "dvv/base/executor.h"
 #include "dvv/base/move_only_function.h"
 #include "dvv/gpu/presenter.h"
+#include "dvv/platform/window_handle.h"
 #include "presenter_logic.h"
 #include "vk.h"
 
@@ -66,9 +67,10 @@ private:
 class PresenterCore {
 public:
     // Allocates only; no Vulkan object exists yet. `context` and `instance` outlive the core: the
-    // Presenter holds the context, which holds the registry and its instance.
+    // Presenter holds the context, which holds the GPU instance and with it the InstanceCore.
+    // `frames` is the provider; options.frames is not read.
     PresenterCore(ExecutionContext& context, std::shared_ptr<DeviceCore> device,
-                  const InstanceCore& instance, PresenterOptions options);
+                  const InstanceCore& instance, PresenterOptions options, FrameProvider frames);
     PresenterCore(const PresenterCore&) = delete;
     PresenterCore& operator=(const PresenterCore&) = delete;
     PresenterCore(PresenterCore&&) = delete;
@@ -77,7 +79,7 @@ public:
     ~PresenterCore();
 
     // Surface, present support, swapchain usage and format, acquire fence (errors: see
-    // ExecutionContext::createPresenter).
+    // createPresenter in presenter_vulkan.h).
     [[nodiscard]] Result<void> initialise();
     // Starts the presenter thread; throws std::system_error or std::bad_alloc.
     void start();
@@ -112,14 +114,14 @@ private:
     void waitForWork(std::unique_lock<std::mutex>& lock);
     void step(Action action);
     void renderFrame();
-    [[nodiscard]] Result<PresentFrame> callProvider(const PresentFrameInfo& info);
+    [[nodiscard]] Result<PresentFrame> callProvider(const PresentFrameParams& params);
     [[nodiscard]] Result<void> checkImage(const std::shared_ptr<GpuImage>& image);
     [[nodiscard]] VkOutcome acquire(std::uint32_t& index);
     void startFrame(PresentFrame frame, std::uint32_t index) noexcept;
     void processCompletion() noexcept;
     void present();
     void recreateSwapchain();
-    void failSwapchain(VkResult result, std::string_view what);
+    void failSwapchain(vk::Result result, std::string_view what);
     void teardown() noexcept;
     void releaseVulkanObjects() noexcept;
     void fail(Error error) noexcept;
@@ -131,7 +133,7 @@ private:
     std::shared_ptr<DeviceCore> device_;
     VkInstance instance_;
     PFN_vkGetInstanceProcAddr get_instance_proc_addr_;
-    platform::NativeWindow window_;
+    platform::WindowHandle window_;
     FrameProvider frames_;
     PresenterErrorHandler on_error_;
     std::string name_;
@@ -140,12 +142,15 @@ private:
     // Presenter thread only (and initialise()/the destructor while no thread runs).
     PresenterLogic logic_;
     Requests snapshot_{};
-    VkSurfaceKHR surface_ = VK_NULL_HANDLE;
+    // Surface creators are reached through vkGetInstanceProcAddr (no vk-bootstrap surface
+    // helpers) and return the C handle; it is wrapped in vk::SurfaceKHR here.
+    vk::SurfaceKHR surface_{};
     VkSurfaceFormatKHR format_{};
-    VkFence fence_ = VK_NULL_HANDLE;
+    PresentEncoding encoding_ = PresentEncoding::Linear;  // presentEncoding(format_.format)
+    vk::Fence fence_;
     bool fence_leaked_ = false;  // the 5 s cap of design M1b §5.2 step 4 passed: never destroyed
-    VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
-    std::vector<VkImage> images_;
+    vk::SwapchainKHR swapchain_;
+    std::vector<vk::Image> images_;
     VkExtent2D extent_{};
     std::uint32_t acquired_index_ = 0;
     bool in_flight_ = false;

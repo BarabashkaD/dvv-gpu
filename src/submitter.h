@@ -2,7 +2,7 @@
 
 // The submit thread and the waiter thread of an ExecutionContext (spec §4). An internal part of
 // the context (exempt from spec §9.4 registration: owned only by its context, created only by
-// GpuRegistry::createContext()).
+// GpuInstance::createContext()).
 //
 // Submit thread: owns the command pool; takes the queued submissions in order, reserves each one's
 // timeline value, records it through a CommandRecorder and submits it (vkQueueSubmit2) with a
@@ -52,7 +52,7 @@ namespace dvv::gpu::detail {
 class DeviceCore;
 struct Access;
 
-// One ctx->submit() on its way through both threads. Allocated when it is queued, so neither
+// One submit(*ctx, ...) on its way through both threads. Allocated when it is queued, so neither
 // thread allocates to hand it on.
 struct Submission {
     RecordFunction record{};

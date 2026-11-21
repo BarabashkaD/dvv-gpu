@@ -18,6 +18,7 @@
 #include <objc/runtime.h>
 
 #include "dvv/gpu/presenter.h"
+#include "dvv/gpu/presenter_vulkan.h"
 #include "dvv/platform/native_window.h"
 #include "dvv/platform/testing/test_window.h"
 #include "present_fixture.h"
@@ -77,7 +78,7 @@ TEST_CASE_FIXTURE(PresentTest, "the swapchain sizes the layer's drawable to the 
 
     PresenterOptions presenter_options = options();
     presenter_options.extent = window().clientSize();
-    auto made = context().createPresenter(std::move(presenter_options));
+    auto made = createPresenter(context(), std::move(presenter_options), provider());
     REQUIRE(made);
     const std::unique_ptr<Presenter> p = std::move(*made);
 

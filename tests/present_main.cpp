@@ -18,7 +18,7 @@
 #include "dvv/base/lifetime.h"
 #include "dvv/base/log.h"
 #include "dvv/gpu/gpu_info.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/platform/native_window.h"
 #include "dvv/platform/testing/test_window.h"
 
@@ -31,20 +31,20 @@ constexpr int EXIT_SKIPPED = 77;
 // support or the display is missing (Errc::Unsupported); an error for any other failure.
 // Validation is off for this probe; the tests themselves validate.
 dvv::Result<std::optional<std::string>> missingPresentation() {
-    const auto registry =
-        dvv::gpu::GpuRegistry::create({.validation = dvv::gpu::ValidationMode::Off,
+    const auto gpu_instance =
+        dvv::gpu::GpuInstance::create({.validation = dvv::gpu::ValidationMode::Off,
                                        .windowSystem = dvv::platform::defaultWindowSystem()});
-    if (!registry) {
-        if (registry.error().code != dvv::Errc::Unsupported) {
-            return std::unexpected(registry.error());
+    if (!gpu_instance) {
+        if (gpu_instance.error().code != dvv::Errc::Unsupported) {
+            return std::unexpected(gpu_instance.error());
         }
-        return registry.error().describe();
+        return gpu_instance.error().describe();
     }
-    const auto best = (*registry)->bestDevice();
+    const auto best = (*gpu_instance)->bestDevice();
     if (!best) {
         return "no Vulkan 1.4 device meets the requirements";
     }
-    if (!(*registry)->devices()[best->index()].optional.swapchain) {
+    if (!(*gpu_instance)->devices()[best->index()].optional.swapchain) {
         return "the best Vulkan device cannot present (no VK_KHR_swapchain)";
     }
     const auto window = dvv::platform::testing::TestWindow::create({.width = 64, .height = 64});

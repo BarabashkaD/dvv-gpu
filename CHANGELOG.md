@@ -6,6 +6,82 @@ the dvv rules: compatible = the same major and at least the minimum version, als
 changes only in a new major, after a deprecation. This file is the release notes (there are no
 GitHub Releases).
 
+## [0.3.0] - 2026-11-21
+
+### Added
+- `dvv/gpu/context_vulkan.h`: free `createBuffer`, `createImage`, `createComputePipeline`,
+  `formatFeatures` and `submit` on an `ExecutionContext`, and `vulkanDesc`, `vulkanFormat`,
+  `vulkanHandle`, `vulkanView`, `vulkanLayout` for a `GpuImage`.
+- `GpuImage::name()`.
+- `dvv/gpu/presenter_vulkan.h`: free `createPresenter(context, options, frames)`.
+- `PresentEncoding` and `PresentFrameParams::encoding`: whether the present step applies the sRGB
+  transfer function. `PresentFrameParams` names the frame provider's input. The encoding is `Srgb`
+  when any component of the swapchain format is sRGB (also `A8B8G8R8_SRGB_PACK32`, whose first
+  component is alpha), else `Linear`.
+- `GpuBuffer::mapWrite()` and `GpuBuffer::mapRead()` with the scopes `MappedWrite` (write, then
+  `flush()`) and `MappedRead` (after the invalidate).
+- `GpuInstance`, `GpuInstanceOptions`, `dvv/gpu/gpu_instance.h` and
+  `ExecutionContext::gpuInstance()`: the names of the process's Vulkan instance.
+- `dvv/gpu/gpu_fwd.h`: declares `GpuInstance`, `ExecutionContext`, `GpuBuffer`, `GpuImage`,
+  `MappedRead` and `MappedWrite` for headers that hold them by pointer. Declare `GpuInstance`
+  ahead through this header, not with your own `class GpuInstance;`.
+- `dvv/gpu/bundled_drivers.h`: `useBundledDrivers(manifests)` points the Vulkan loader at bundled
+  driver manifests unless the user chose drivers, and returns a `DriverChoice`. A manifest whose
+  path contains the list separator (`;` on Windows, `:` elsewhere) gives `Errc::Unsupported`: the
+  loader would split the value there.
+- `BufferCopy` and `GroupCount` forms of `CommandRecorder::copyBuffer` and `dispatch`;
+  `Presenter::show()` and `hide()`.
+- dvv-gpu creates its Vulkan surfaces itself.
+
+### Changed
+- Requires dvv-platform 0.3.0 and dvv-base 0.5.0.
+- The pipeline cache is written through dvv-platform's atomic replace. An existing file keeps its
+  permission bits (POSIX) and its attributes (Windows); the temporary file's name has no process id.
+  On Windows a busy file is still tried 5 times; on macOS and Linux the replace is tried once (it
+  was tried up to 5 times). A cache path that is a symbolic link is no longer replaced: the save
+  fails with an I/O error.
+- Paths in pipeline-cache messages are display text: a name that has no UTF-8 form shows U+FFFD
+  instead of failing.
+- The Linux build of dvv-gpu needs the X11 headers (the Xlib surface code moved from dvv-platform,
+  which needed them for the same reason).
+- Per-OS code lives in per-OS files; the os-blocks baseline is gone.
+- `PresentFrameInfo` (`PresentFrameParams`) has a fifth field, `encoding`, so a structured binding
+  of it needs five names.
+
+### Deprecated (removed in 1.0.0)
+- `PresentFrameInfo` (use `PresentFrameParams`) and its `format` field (use `encoding`).
+- `ExecutionContext::createBuffer`, `createImage`, both `createComputePipeline`, `formatFeatures`
+  and `submit` (use the free functions of the same names in context_vulkan.h, which take the
+  context first).
+- `GpuImage::desc()`, `format()`, `handle()`, `view()` and `layout()` (use `vulkanDesc`,
+  `vulkanFormat`, `vulkanHandle`, `vulkanView` and `vulkanLayout` in context_vulkan.h) and
+  `GpuImage`'s public `enable_shared_from_this` base (hold the image's `shared_ptr`).
+- `ExecutionContext::createPresenter` and `PresenterOptions::frames` (use the free
+  `createPresenter(context, options, frames)` in presenter_vulkan.h); reaching `PresentFrame` and
+  `FrameProvider` through presenter.h (include presenter_vulkan.h).
+- The type of `PresenterOptions::window`: nothing changes in 0.3.x; 1.0.0 makes it a
+  `dvv::platform::WindowHandle`.
+- `GpuBuffer::mapped()` with `flush()` (use `mapWrite()` and `MappedWrite::flush()`), and
+  `invalidate()` with `mapped()` (use `mapRead()`).
+- `ResourcePool`, `ResourcePoolStats`, `ExecutionContext::createResourcePool` and the header
+  `dvv/gpu/resource_pool.h` (no replacement; frame-memory reuse belongs to the frame store).
+- The five-value `copyBuffer`, the `dispatch` overloads with trailing group counts and
+  `Presenter::setVisible(bool)` (use the `BufferCopy` and `GroupCount` forms, `show()` and
+  `hide()`).
+- `GpuRegistry`, `GpuRegistryOptions`, `dvv/gpu/gpu_registry.h` and `ExecutionContext::registry()`
+  (use `GpuInstance`, `GpuInstanceOptions`, `dvv/gpu/gpu_instance.h` and `gpuInstance()`).
+- Reaching names through execution_context.h, gpu_instance.h or presenter.h that 1.0.0 removes
+  from them: these headers stop including the Vulkan headers, resources.h and submission.h, and with
+  them compute_pipeline.h, command_recorder.h and resource_pool.h; `GpuImage` moves to image.h.
+  Code that uses `GpuBuffer`, `BufferDesc`, `ImageDesc`, `RecordFunction`, `SubmitOperation`,
+  `ComputePipeline`, `CommandRecorder` or a Vulkan type includes the header that declares it, or
+  context_vulkan.h or presenter_vulkan.h.
+
+### Fixed
+- A frame provider exception that does not derive from `std::exception` skips the frame (reported
+  through onError) instead of terminating the process.
+- Releasing a GPU resource never allocates, so it cannot terminate on out-of-memory.
+
 ## [0.2.1] - 2026-11-08
 
 ### Fixed

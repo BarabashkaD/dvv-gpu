@@ -5,8 +5,11 @@
 
 namespace dvv::gpu::detail {
 
-void waitForThreadDispatchingSentMessages(void* thread) noexcept {
-    const HANDLE handle = thread;
+namespace {
+
+// Returns once the thread `handle` names has ended, dispatching only sent messages meanwhile, or
+// after logging a failed wait.
+void waitDispatchingSentMessages(HANDLE handle) noexcept {
     while (true) {
         const DWORD woken =
             MsgWaitForMultipleObjectsEx(1, &handle, INFINITE, QS_SENDMESSAGE, MWMO_INPUTAVAILABLE);
@@ -27,6 +30,16 @@ void waitForThreadDispatchingSentMessages(void* thread) noexcept {
             GetLastError());
         return;
     }
+}
+
+}  // namespace
+
+void joinDispatchingSentMessages(std::jthread& thread) noexcept {
+    if (!thread.joinable()) {
+        return;
+    }
+    waitDispatchingSentMessages(thread.native_handle());
+    thread.join();
 }
 
 }  // namespace dvv::gpu::detail

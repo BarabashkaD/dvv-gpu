@@ -1,6 +1,6 @@
 #pragma once
 
-// The Vulkan instance behind a GpuRegistry: validation settings, the instance and its dispatcher,
+// The Vulkan instance behind a GpuInstance: validation settings, the instance and its dispatcher,
 // and the debug messenger that counts and logs messages.
 
 #include <atomic>
@@ -17,34 +17,41 @@
 #include "devices.h"
 #include "dvv/base/error.h"
 #include "dvv/base/log.h"
-#include "dvv/gpu/gpu_registry.h"
-#include "dvv/platform/native_window.h"
+#include "dvv/gpu/gpu_instance.h"
+#include "dvv/platform/window_handle.h"
 #include "vk.h"
 
 namespace dvv::gpu::detail {
 
 inline constexpr char VALIDATION_LAYER[] = "VK_LAYER_KHRONOS_validation";
 
-// What GpuRegistry::create was asked for, before the layer's presence is known.
-struct ValidationRequest {
+// What GpuInstance::create resolved from the options and the environment, before the layer's
+// presence is known.
+struct ValidationChoice {
     ValidationMode mode = ValidationMode::Off;
     bool required = false;
     bool explicitlyRequested = false;  // by the options or DVV_VK_VALIDATION, not by default
 };
+
+// Each enum puts the meaning of the old `false` first.
+enum class BuildType : std::uint8_t { Release, Debug };
+enum class LayerPresence : std::uint8_t { Missing, Installed };
+enum class FailedStep : std::uint8_t { AfterCreateInstance, CreateInstance };
+enum class Requirement : std::uint8_t { Optional, Required };
 
 // "off", "on" or "sync"; Errc::Format otherwise.
 [[nodiscard]] Result<ValidationMode> parseValidationMode(std::string_view text);
 
 // The options win; unset options fall back to the environment values (nullopt or empty = unset),
 // then to the default (On in Debug builds, Off in Release builds; not required).
-[[nodiscard]] Result<ValidationRequest> resolveValidation(
-    const GpuRegistryOptions& options, const std::optional<std::string>& environment_mode,
-    const std::optional<std::string>& environment_required, bool debug_build);
+[[nodiscard]] Result<ValidationChoice> resolveValidation(
+    const GpuInstanceOptions& options, const std::optional<std::string>& environment_mode,
+    const std::optional<std::string>& environment_required, BuildType build);
 
 // The mode to enable: the requested one when the layer is installed (in version 1.4 or newer);
 // otherwise Off, or Errc::Unsupported when validation is required.
-[[nodiscard]] Result<ValidationMode> effectiveValidation(const ValidationRequest& request,
-                                                         bool layer_installed);
+[[nodiscard]] Result<ValidationMode> effectiveValidation(const ValidationChoice& choice,
+                                                         LayerPresence layer);
 
 // Messenger policy: errors of any type count, and so do validation or performance warnings.
 // General warnings come from the loader and depend on the machine, so they do not count.
@@ -61,10 +68,10 @@ struct ValidationRequest {
                                              vk::DebugUtilsMessageTypeFlagsEXT types,
                                              std::string_view id_name, std::string_view message);
 
-// The instance extensions the registry's window system needs: none for a headless registry,
-// otherwise platform::surfaceInstanceExtensions(*options.windowSystem).
+// The instance extensions the GPU instance's window system needs: none for a headless one,
+// otherwise detail::surfaceInstanceExtensions(*options.windowSystem) (surface_vulkan.h).
 [[nodiscard]] std::span<const char* const> windowSystemExtensions(
-    const GpuRegistryOptions& options) noexcept;
+    const GpuInstanceOptions& options) noexcept;
 
 // Errc::Unsupported "the Vulkan loader does not offer <extension>, which the <name> window system
 // needs" for the first required extension that is not available.
@@ -79,26 +86,29 @@ struct ValidationRequest {
 // through InstanceBuilder constructed with vulkanLoader()'s vkGetInstanceProcAddr, and through its
 // physical-device and device builders without a surface. Never use vkb::destroy_surface,
 // SwapchainBuilder, a selector with a surface, or an entry point without that pointer: it would
-// load vulkan-1.dll with the default search. Surfaces come from dvv::platform::createSurface, and
-// swapchains from Vulkan-Hpp with the device dispatcher. Its tables are not synchronised, so every
-// vk-bootstrap call (instance, physical device or device builders) must hold this mutex.
+// load vulkan-1.dll with the default search. Surfaces come from detail::createSurface
+// (surface_vulkan.h), and swapchains from Vulkan-Hpp with the device dispatcher. Its tables are not
+// synchronised, so every vk-bootstrap call (instance, physical device or device builders) must hold
+// this mutex.
 [[nodiscard]] std::mutex& vkBootstrapMutex();
 
 // Whether a failed instance build is retried without the validation layer: vkCreateInstance itself
-// failed (`create_instance_failed`; a later step such as creating the messenger leaves an instance
-// behind), the layer was listed but could not be loaded, and validation is not required. Loaders
-// report that as VK_ERROR_LAYER_NOT_PRESENT (Linux loader 1.3.275) or VK_ERROR_OUT_OF_HOST_MEMORY
-// (Windows loader 1.4.341); a real out-of-memory failure then fails again in the retry.
-[[nodiscard]] bool retryWithoutValidation(bool create_instance_failed, VkResult result,
-                                          ValidationMode validation, bool required) noexcept;
+// failed (`FailedStep::CreateInstance`; a later step such as creating the messenger leaves an
+// instance behind), the layer was listed but could not be loaded, and validation is not required.
+// Loaders report that as VK_ERROR_LAYER_NOT_PRESENT (Linux loader 1.3.275) or
+// VK_ERROR_OUT_OF_HOST_MEMORY (Windows loader 1.4.341); a real out-of-memory failure then fails
+// again in the retry.
+[[nodiscard]] bool retryWithoutValidation(FailedStep step, VkResult result,
+                                          ValidationMode validation,
+                                          Requirement requirement) noexcept;
 
-// Implementation part of GpuRegistry (exempt from spec §9.4 registration: owned only by its
-// registry, with the same lifetime). Created only by create(); the public default constructor
+// Implementation part of GpuInstance (exempt from spec §9.4 registration: owned only by its
+// GPU instance, with the same lifetime). Created only by create(); the public default constructor
 // serves create() and white-box tests.
 class InstanceCore {
 public:
     [[nodiscard]] static Result<std::unique_ptr<InstanceCore>> create(
-        const GpuRegistryOptions& options);
+        const GpuInstanceOptions& options);
 
     InstanceCore() = default;
     InstanceCore(const InstanceCore&) = delete;

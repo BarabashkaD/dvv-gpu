@@ -1,6 +1,6 @@
-// dvv-gpu-info: prints what the GpuRegistry finds (spec §5.1).
+// dvv-gpu-info: prints what the GpuInstance finds.
 //   dvv-gpu-info [--json]
-// Exit codes (spec §10.3): 0 a usable device exists, 1 bad arguments, 4 GPU error, e.g. no Vulkan
+// Exit codes: 0 a usable device exists, 1 bad arguments, 4 GPU error, e.g. no Vulkan
 // loader or no usable device.
 
 #include <cstdint>
@@ -19,7 +19,7 @@
 #include "dvv/base/log.h"
 #include "dvv/gpu/gpu_info.h"
 #include "dvv/gpu/gpu_info_json.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 
 namespace {
 
@@ -38,13 +38,14 @@ std::string formatBytes(std::uint64_t bytes) {
     return std::format("{:.1f} GiB", static_cast<double>(bytes) / GIB);
 }
 
-void printText(const dvv::gpu::GpuRegistry& registry) {
-    const auto best = registry.bestDevice();
+void printText(const dvv::gpu::GpuInstance& gpu_instance) {
+    const auto best = gpu_instance.bestDevice();
     std::println("Vulkan loader {}, validation {}, {} device(s)",
-                 dvv::gpu::formatVulkanVersion(registry.loaderVersion()),
-                 dvv::gpu::validationModeName(registry.validation()), registry.devices().size());
-    for (const dvv::gpu::DeviceId id : registry.rankedDevices()) {
-        const dvv::gpu::GpuInfo& info = registry.devices()[id.index()];
+                 dvv::gpu::formatVulkanVersion(gpu_instance.loaderVersion()),
+                 dvv::gpu::validationModeName(gpu_instance.validation()),
+                 gpu_instance.devices().size());
+    for (const dvv::gpu::DeviceId id : gpu_instance.rankedDevices()) {
+        const dvv::gpu::GpuInfo& info = gpu_instance.devices()[id.index()];
         std::println("");
         std::println("Device {}: {} ({}){}", id, info.name, dvv::gpu::deviceTypeName(info.type),
                      best == id ? ", selected" : "");
@@ -72,15 +73,15 @@ void printText(const dvv::gpu::GpuRegistry& registry) {
     }
 }
 
-void printJson(const dvv::gpu::GpuRegistry& registry) {
+void printJson(const dvv::gpu::GpuInstance& gpu_instance) {
     dvv::json::Value devices = dvv::json::Value::array();
-    for (const dvv::gpu::DeviceId id : registry.rankedDevices()) {
-        devices.push_back(dvv::gpu::toJson(registry.devices()[id.index()]));
+    for (const dvv::gpu::DeviceId id : gpu_instance.rankedDevices()) {
+        devices.push_back(dvv::gpu::toJson(gpu_instance.devices()[id.index()]));
     }
-    const auto best = registry.bestDevice();
+    const auto best = gpu_instance.bestDevice();
     const dvv::json::Value output{
-        {"loaderVersion", dvv::gpu::formatVulkanVersion(registry.loaderVersion())},
-        {"validation", dvv::gpu::validationModeName(registry.validation())},
+        {"loaderVersion", dvv::gpu::formatVulkanVersion(gpu_instance.loaderVersion())},
+        {"validation", dvv::gpu::validationModeName(gpu_instance.validation())},
         {"selectedDevice", best ? dvv::json::Value(best->index()) : dvv::json::Value(nullptr)},
         {"devices", std::move(devices)},
     };
@@ -115,17 +116,17 @@ int run(int argc, char** argv) {
         }
     }
 
-    const auto registry = dvv::gpu::GpuRegistry::create();
-    if (!registry) {
-        printError(registry.error(), json);
+    const auto gpu_instance = dvv::gpu::GpuInstance::create();
+    if (!gpu_instance) {
+        printError(gpu_instance.error(), json);
         return EXIT_GPU_ERROR;
     }
     if (json) {
-        printJson(**registry);
+        printJson(**gpu_instance);
     } else {
-        printText(**registry);
+        printText(**gpu_instance);
     }
-    return (*registry)->bestDevice() ? EXIT_OK : EXIT_GPU_ERROR;
+    return (*gpu_instance)->bestDevice() ? EXIT_OK : EXIT_GPU_ERROR;
 }
 
 }  // namespace

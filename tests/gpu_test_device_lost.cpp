@@ -17,6 +17,7 @@
 #include "dvv/base/task.h"
 #include "dvv/base/when_all.h"
 #include "dvv/gpu/command_recorder.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/resources.h"
 #include "dvv/gpu/submission.h"
@@ -41,7 +42,7 @@ constexpr std::uint32_t ADD_ONE_PUSH_SIZE = 16;  // add_one: buffer address, cou
 
 dvv::Task<Result<std::uint64_t>> submitTask(ExecutionContext& context, dvv::IExecutor& executor,
                                             RecordFunction record) {
-    co_return co_await context.submit(executor, std::move(record));
+    co_return co_await submit(context, executor, std::move(record));
 }
 
 // A DeviceLost error caused by an injection.
@@ -104,39 +105,38 @@ TEST_CASE_FIXTURE(GpuTest,
 
 TEST_CASE_FIXTURE(GpuTest, "creators refuse a lost context") {
     dvv::gpu::testing::injectDeviceLost(context());
-    const auto buffer = context().createBuffer({.size = 64,
-                                                .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                .memory = MemoryUsage::DeviceOnly,
-                                                .name = "lost"});
+    const auto buffer = createBuffer(context(), {.size = 64,
+                                                 .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                 .memory = MemoryUsage::DeviceOnly,
+                                                 .name = "lost"});
     REQUIRE_FALSE(buffer.has_value());
     CHECK(buffer.error().code == Errc::DeviceLost);
-    const auto image = context().createImage({.width = 4,
-                                              .height = 4,
-                                              .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                              .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                              .name = "lost"});
+    const auto image = createImage(context(), {.width = 4,
+                                               .height = 4,
+                                               .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                               .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                               .name = "lost"});
     REQUIRE_FALSE(image.has_value());
     CHECK(image.error().code == Errc::DeviceLost);
     const auto pool = context().createResourcePool();
     REQUIRE_FALSE(pool.has_value());
     CHECK(pool.error().code == Errc::DeviceLost);
     const auto pipeline =
-        context().createComputePipeline(test_shaders::addOne(), ADD_ONE_PUSH_SIZE);
+        createComputePipeline(context(), test_shaders::addOne(), ADD_ONE_PUSH_SIZE);
     REQUIRE_FALSE(pipeline.has_value());
     CHECK(pipeline.error().code == Errc::DeviceLost);
-    const auto bound = context().createComputePipeline(test_shaders::addOne(), ADD_ONE_PUSH_SIZE,
-                                                       dvv::gpu::ComputeBindings{});
+    const auto bound = createComputePipeline(context(), test_shaders::addOne(), ADD_ONE_PUSH_SIZE,
+                                             dvv::gpu::ComputeBindings{});
     REQUIRE_FALSE(bound.has_value());
     CHECK(bound.error().code == Errc::DeviceLost);
     CHECK(bound.error().message == "the device was lost (injected)");
 }
 
 TEST_CASE_FIXTURE(GpuTest, "objects released after an injection are freed by the real timeline") {
-    auto buffer = context()
-                      .createBuffer({.size = std::uint64_t{64} * 1024,
-                                     .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                     .memory = MemoryUsage::DeviceOnly,
-                                     .name = "released after the loss"})
+    auto buffer = createBuffer(context(), {.size = std::uint64_t{64} * 1024,
+                                           .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                           .memory = MemoryUsage::DeviceOnly,
+                                           .name = "released after the loss"})
                       .value();
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
                 recorder.fillBuffer(*buffer, 0x5a5a5a5aU);
@@ -154,10 +154,11 @@ TEST_CASE_FIXTURE(GpuTest,
         CAPTURE(round);
         const TemporaryDirectory dir;
         const std::filesystem::path file = dir.path() / "cache.bin";
-        auto ctx =
-            registry().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();
+        auto ctx = gpuInstance()
+                       .createContext(device(), ContextOptions{.pipelineCacheFile = file})
+                       .value();
         // A new pipeline changes the cache, so a healthy context would save it.
-        REQUIRE(ctx->createComputePipeline(test_shaders::addOne(), ADD_ONE_PUSH_SIZE).has_value());
+        REQUIRE(createComputePipeline(*ctx, test_shaders::addOne(), ADD_ONE_PUSH_SIZE).has_value());
         REQUIRE(dvv::syncWait(submitTask(*ctx, executor(), {})).has_value());
         dvv::gpu::testing::injectDeviceLost(*ctx);
         CHECK(injectedLoss(dvv::syncWait(submitTask(*ctx, executor(), {}))));

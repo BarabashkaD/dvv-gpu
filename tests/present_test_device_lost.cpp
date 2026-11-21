@@ -11,9 +11,11 @@
 #include "access.h"
 #include "device_core.h"
 #include "dvv/base/error.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/presenter.h"
+#include "dvv/gpu/presenter_vulkan.h"
 #include "dvv/gpu/resources.h"
 #include "dvv/gpu/testing/fault_injection.h"
 #include "dvv/platform/testing/test_window.h"
@@ -23,14 +25,13 @@ namespace dvv::gpu::test {
 
 namespace {
 
+// The frame provider is createPresenter's own argument.
 PresenterOptions lostTestOptions(platform::testing::TestWindow& window,
-                                 const std::shared_ptr<ExecutionContext>& context,
-                                 const std::shared_ptr<ProviderControl>& control,
                                  const std::shared_ptr<ErrorLog>& log) {
     return {.window = window.native(),
             .extent = window.clientSize(),
             .visible = true,
-            .frames = testFrameProvider(context, control),
+            .frames = {},
             .onError =
                 [log](const Error& error) noexcept {
                     try {
@@ -83,14 +84,15 @@ TEST_CASE_FIXTURE(PresentTest,
                   "hang") {
     for (int round = 0; round < 10; ++round) {
         CAPTURE(round);
-        const auto best = registry().bestDevice();
+        const auto best = gpuInstance().bestDevice();
         REQUIRE(best.has_value());
-        auto ctx = registry()
+        auto ctx = gpuInstance()
                        .createContext(best.value_or(dvv::gpu::DeviceId{0}), {.presentation = true})
                        .value();
         const auto control = std::make_shared<ProviderControl>();
         const auto log = std::make_shared<ErrorLog>();
-        auto created = ctx->createPresenter(lostTestOptions(window(), ctx, control, log));
+        auto created =
+            createPresenter(*ctx, lostTestOptions(window(), log), testFrameProvider(ctx, control));
         REQUIRE(created.has_value());
         std::unique_ptr<Presenter> p = std::move(*created);
         REQUIRE(pumpUntil(window(), [&] {
@@ -108,8 +110,9 @@ TEST_CASE_FIXTURE(PresentTest,
         REQUIRE_FALSE(log->errors().empty());
         CHECK(log->errors()[0].code == Errc::DeviceLost);
 
-        const auto second = ctx->createPresenter(
-            lostTestOptions(window(), ctx, std::make_shared<ProviderControl>(), log));
+        const auto second =
+            createPresenter(*ctx, lostTestOptions(window(), log),
+                            testFrameProvider(ctx, std::make_shared<ProviderControl>()));
         REQUIRE_FALSE(second.has_value());
         CHECK(second.error().code == Errc::DeviceLost);
 
@@ -128,14 +131,15 @@ TEST_CASE_FIXTURE(PresentTest,
 TEST_CASE_FIXTURE(PresentTest, "a provider error on a lost context fails the presenter once") {
     for (const bool provider_allocates : {true, false}) {
         CAPTURE(provider_allocates);
-        const auto best = registry().bestDevice();
+        const auto best = gpuInstance().bestDevice();
         REQUIRE(best.has_value());
-        auto ctx = registry()
+        auto ctx = gpuInstance()
                        .createContext(best.value_or(dvv::gpu::DeviceId{0}), {.presentation = true})
                        .value();
         const auto control = std::make_shared<ProviderControl>();
         const auto log = std::make_shared<ErrorLog>();
-        auto created = ctx->createPresenter(lostTestOptions(window(), ctx, control, log));
+        auto created =
+            createPresenter(*ctx, lostTestOptions(window(), log), testFrameProvider(ctx, control));
         REQUIRE(created.has_value());
         std::unique_ptr<Presenter> p = std::move(*created);
         // Only the initial request: once it is presented, the presenter waits with no frame in
@@ -176,9 +180,9 @@ TEST_CASE_FIXTURE(PresentTest, "a provider error on a lost context fails the pre
 TEST_CASE_FIXTURE(PresentTest, "a device loss seen only by the presenter marks the context lost") {
     for (const bool in_present : {true, false}) {
         CAPTURE(in_present);
-        const auto best = registry().bestDevice();
+        const auto best = gpuInstance().bestDevice();
         REQUIRE(best.has_value());
-        auto ctx = registry()
+        auto ctx = gpuInstance()
                        .createContext(best.value_or(dvv::gpu::DeviceId{0}), {.presentation = true})
                        .value();
         auto& api = mutableDispatch(*ctx);
@@ -191,7 +195,8 @@ TEST_CASE_FIXTURE(PresentTest, "a device loss seen only by the presenter marks t
         }
         const auto control = std::make_shared<ProviderControl>();
         const auto log = std::make_shared<ErrorLog>();
-        auto created = ctx->createPresenter(lostTestOptions(window(), ctx, control, log));
+        auto created =
+            createPresenter(*ctx, lostTestOptions(window(), log), testFrameProvider(ctx, control));
         REQUIRE(created.has_value());
         std::unique_ptr<Presenter> p = std::move(*created);
         REQUIRE(pumpUntil(window(), [&] {
@@ -200,10 +205,10 @@ TEST_CASE_FIXTURE(PresentTest, "a device loss seen only by the presenter marks t
         }));
         CHECK(p->failure().value_or(dvv::Error{}).code == Errc::DeviceLost);
         CHECK(ctx->lost());
-        const auto buffer = ctx->createBuffer({.size = 256,
-                                               .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                               .memory = MemoryUsage::DeviceOnly,
-                                               .name = "after a presenter loss"});
+        const auto buffer = createBuffer(*ctx, {.size = 256,
+                                                .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                .memory = MemoryUsage::DeviceOnly,
+                                                .name = "after a presenter loss"});
         REQUIRE_FALSE(buffer.has_value());
         CHECK(buffer.error().code == Errc::DeviceLost);
         p.reset();

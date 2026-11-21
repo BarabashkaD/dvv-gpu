@@ -11,7 +11,9 @@
 #include <vulkan/vulkan_core.h>
 
 #include "dvv/gpu/command_recorder.h"
+#include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/device_id.h"
+#include "dvv/gpu/presenter_vulkan.h"
 #include "dvv/gpu/resources.h"
 
 namespace dvv::gpu::test {
@@ -40,32 +42,35 @@ FrameProvider testFrameProvider(std::shared_ptr<ExecutionContext> context,
     return [context = std::move(context), control = std::move(control),
             buffer = std::shared_ptr<GpuBuffer>{}, image = std::shared_ptr<GpuImage>{},
             extent = platform::PixelSize{}](
-               const PresentFrameInfo& info) mutable -> Result<PresentFrame> {
+               const PresentFrameParams& info) mutable -> Result<PresentFrame> {
         control->calls.fetch_add(1);
         if (control->failNext.exchange(false)) {
             return makeError(Errc::Io, "injected provider failure");
+        }
+        if (control->throwNext.exchange(false)) {
+            throw 42;
         }
         if (control->newImage.exchange(false) || !image || info.extent != extent) {
             const std::uint64_t size =
                 static_cast<std::uint64_t>(info.extent.width) * info.extent.height * 4;
             DVV_TRY(auto new_buffer,
-                    context->createBuffer({.size = size,
-                                           .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                                    VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                           .memory = MemoryUsage::DeviceOnly,
-                                           .name = "present test pixels"}));
+                    createBuffer(*context, {.size = size,
+                                            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                            .memory = MemoryUsage::DeviceOnly,
+                                            .name = "present test pixels"}));
             const VkImageUsageFlags usage =
                 control->withoutTransferSrc.load()
                     ? VkImageUsageFlags{VK_IMAGE_USAGE_TRANSFER_DST_BIT}
                     : VkImageUsageFlags{VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT};
-            DVV_TRY(auto new_image, context->createImage({.width = info.extent.width,
-                                                          .height = info.extent.height,
-                                                          .format = control->integerFormat.load()
-                                                                        ? VK_FORMAT_R8G8B8A8_UINT
-                                                                        : VK_FORMAT_R8G8B8A8_UNORM,
-                                                          .usage = usage,
-                                                          .name = "present test image"}));
+            DVV_TRY(auto new_image, createImage(*context, {.width = info.extent.width,
+                                                           .height = info.extent.height,
+                                                           .format = control->integerFormat.load()
+                                                                         ? VK_FORMAT_R8G8B8A8_UINT
+                                                                         : VK_FORMAT_R8G8B8A8_UNORM,
+                                                           .usage = usage,
+                                                           .name = "present test image"}));
             buffer = std::move(new_buffer);
             image = std::move(new_image);
             extent = info.extent;
@@ -96,14 +101,14 @@ bool pumpUntil(platform::testing::TestWindow& window, const std::function<bool()
 }
 
 PresentTest::PresentTest() {
-    auto registry = GpuRegistry::create({.windowSystem = platform::defaultWindowSystem()});
-    if (!registry) {
-        FAIL(registry.error().describe());
+    auto gpu_instance = GpuInstance::create({.windowSystem = platform::defaultWindowSystem()});
+    if (!gpu_instance) {
+        FAIL(gpu_instance.error().describe());
     }
-    registry_ = std::move(*registry);
-    const auto best = registry_->bestDevice();
+    gpu_instance_ = std::move(*gpu_instance);
+    const auto best = gpu_instance_->bestDevice();
     REQUIRE(best.has_value());
-    auto context = registry_->createContext(best.value_or(DeviceId(0)), {.presentation = true});
+    auto context = gpu_instance_->createContext(best.value_or(DeviceId(0)), {.presentation = true});
     if (!context) {
         FAIL(context.error().describe());
     }
@@ -118,14 +123,14 @@ PresentTest::PresentTest() {
 
 PresentTest::~PresentTest() {
     context_.reset();
-    CHECK(registry_->validationMessageCount() == 0);
+    CHECK(gpu_instance_->validationMessageCount() == 0);
 }
 
 PresenterOptions PresentTest::options() {
     return {.window = window().native(),
             .extent = window().clientSize(),
             .visible = true,
-            .frames = testFrameProvider(context_, control_),
+            .frames = {},
             .onError =
                 [log = errors_](const Error& error) noexcept {
                     try {
@@ -137,8 +142,12 @@ PresenterOptions PresentTest::options() {
             .name = "present test"};
 }
 
+FrameProvider PresentTest::provider() {
+    return testFrameProvider(context_, control_);
+}
+
 std::unique_ptr<Presenter> PresentTest::makePresenter() {
-    auto presenter = context_->createPresenter(options());
+    auto presenter = createPresenter(*context_, options(), provider());
     if (!presenter) {
         FAIL(presenter.error().describe());
     }

@@ -1,27 +1,22 @@
 #include "pipeline_cache.h"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <format>
 #include <fstream>
 #include <new>
 #include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
 #include "device_core.h"
 #include "dvv/base/log.h"
 #include "dvv/base/paths.h"
+#include "dvv/base/utf8.h"
+#include "dvv/platform/file_writer.h"
 #include "vk_result.h"
-
-#if defined(_WIN32)
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
 
 namespace dvv::gpu::detail {
 
@@ -32,9 +27,10 @@ namespace {
 constexpr std::size_t HEADER_SIZE = 16 + VK_UUID_SIZE;
 // The dvv trailer: the size of the driver data, its FNV-1a checksum, then this magic value.
 constexpr char TRAILER_MAGIC[8] = {'d', 'v', 'v', 'p', 'c', 'a', 'c', '1'};
-// A rename over a file that another process has open briefly fails on Windows.
-constexpr int RENAME_ATTEMPTS = 5;
-constexpr auto RENAME_RETRY_DELAY = std::chrono::milliseconds(10);
+// A replace over a file that another process has open briefly fails on Windows: 4 more attempts,
+// so 5 in total as before.
+constexpr std::uint32_t REPLACE_RETRIES = 4;
+constexpr auto REPLACE_RETRY_DELAY = std::chrono::milliseconds(10);
 
 std::uint32_t readWord(std::span<const std::byte> data, std::size_t offset) noexcept {
     std::uint32_t word = 0;
@@ -46,21 +42,6 @@ std::uint64_t readQuad(std::span<const std::byte> data, std::size_t offset) noex
     std::uint64_t quad = 0;
     std::memcpy(&quad, data.data() + offset, sizeof(quad));
     return quad;
-}
-
-// Paths in messages are UTF-8: path::string() converts to the ANSI code page on Windows and
-// throws for characters outside it (e.g. in the user profile's name).
-std::string utf8(const std::filesystem::path& path) {
-    const std::u8string text = path.u8string();
-    return {reinterpret_cast<const char*>(text.data()), text.size()};
-}
-
-unsigned long long processId() noexcept {
-#if defined(_WIN32)
-    return static_cast<unsigned long long>(_getpid());
-#else
-    return static_cast<unsigned long long>(getpid());
-#endif
 }
 
 void appendTrailer(std::vector<std::byte>& data, std::uint64_t checksum) {
@@ -105,40 +86,23 @@ std::optional<std::vector<std::byte>> readFile(const std::filesystem::path& file
     return data;
 }
 
-// Writes `data` to `file` through a temporary file of this call and a rename.
+// Writes `data` to `file` through dvv-platform's atomic replace (a temporary file in the same
+// folder, then a replace). A torn file is detected by the trailer check, so no flush is needed.
 Result<void> writeFile(const std::filesystem::path& file, std::span<const std::byte> data) {
     if (file.has_parent_path()) {
         DVV_TRY_VOID(paths::ensureDirectory(file.parent_path()));
     }
-    static std::atomic<std::uint64_t> counter{0};
-    std::filesystem::path temporary = file;
-    temporary += std::format(".{}-{}.tmp", processId(), counter.fetch_add(1));
-    std::error_code error;
-    {
-        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-        stream.write(reinterpret_cast<const char*>(data.data()),
-                     static_cast<std::streamsize>(data.size()));
-        stream.close();
-        if (!stream) {
-            std::filesystem::remove(temporary, error);
-            return makeError(Errc::Io,
-                             std::format("writing the pipeline cache {} failed", utf8(temporary)));
-        }
-    }
-    for (int attempt = 1;; ++attempt) {
-        std::filesystem::rename(temporary, file, error);  // replaces the old file
-        if (!error || attempt == RENAME_ATTEMPTS) {
-            break;
-        }
-        std::this_thread::sleep_for(RENAME_RETRY_DELAY);
-    }
-    if (error) {
-        const std::string reason = error.message();
-        std::filesystem::remove(temporary, error);
-        return makeError(Errc::Io, std::format("replacing the pipeline cache {} failed: {}",
-                                               utf8(file), reason));
-    }
-    return {};
+    return platform::replaceFile(file, data,
+                                 {.durability = platform::FileDurability::Unflushed,
+                                  .retries = REPLACE_RETRIES,
+                                  .retryDelay = REPLACE_RETRY_DELAY,
+                                  .lostTarget = platform::LostTarget::RemoveTemporary});
+}
+
+// `error` with store()'s context in front of its message.
+std::unexpected<Error> saveError(Error error) {
+    error.message = std::format("saving the pipeline cache failed: {}", error.message);
+    return std::unexpected(std::move(error));
 }
 
 }  // namespace
@@ -229,7 +193,7 @@ Result<std::unique_ptr<PipelineCache>> PipelineCache::create(
             }
         }
         if (!problem.empty()) {
-            DVV_LOG_WARN("pipeline cache {} ignored: {}", utf8(file), problem);
+            DVV_LOG_WARN("pipeline cache {} ignored: {}", dvv::pathDisplayText(file), problem);
         }
     }
 
@@ -238,8 +202,8 @@ Result<std::unique_ptr<PipelineCache>> PipelineCache::create(
     auto cache = core->device().createPipelineCache(info, nullptr, core->dispatch());
     if (cache.result != vk::Result::eSuccess && !initial.empty() &&
         errcOf(cache.result) != Errc::OutOfMemory) {
-        DVV_LOG_WARN("pipeline cache {} ignored: the driver rejected it ({})", utf8(file),
-                     vk::to_string(cache.result));
+        DVV_LOG_WARN("pipeline cache {} ignored: the driver rejected it ({})",
+                     dvv::pathDisplayText(file), vk::to_string(cache.result));
         initial.clear();
         info.initialDataSize = 0;
         info.pInitialData = nullptr;
@@ -250,7 +214,8 @@ Result<std::unique_ptr<PipelineCache>> PipelineCache::create(
     std::unique_ptr<PipelineCache> made;
     try {
         if (loaded) {
-            DVV_LOG_INFO("pipeline cache loaded from {} ({} bytes)", utf8(file), initial.size());
+            DVV_LOG_INFO("pipeline cache loaded from {} ({} bytes)", dvv::pathDisplayText(file),
+                         initial.size());
         }
         made = std::make_unique<PipelineCache>(core, std::move(file), cache.value, loaded);
     } catch (...) {
@@ -306,7 +271,11 @@ Result<void> PipelineCache::store(bool only_if_changed) {
         return {};
     }
     const std::scoped_lock lock(save_mutex_);
-    DVV_TRY(std::vector<std::byte> data, fetch());
+    Result<std::vector<std::byte>> fetched = fetch();
+    if (!fetched) {
+        return saveError(std::move(fetched).error());
+    }
+    std::vector<std::byte> data = std::move(*fetched);
     const Fingerprint current{.size = data.size(), .checksum = fnv1a64(data)};
     if (only_if_changed && stored_ == current) {
         std::error_code error;
@@ -315,7 +284,9 @@ Result<void> PipelineCache::store(bool only_if_changed) {
         }
     }
     appendTrailer(data, current.checksum);
-    DVV_TRY_VOID(writeFile(file_, data));
+    if (Result<void> written = writeFile(file_, data); !written) {
+        return saveError(std::move(written).error());
+    }
     stored_ = current;
     return {};
 }

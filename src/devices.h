@@ -53,7 +53,7 @@ void forEachRequiredFeature(Chain& chain, Visit&& visit) {
     visit("pushDescriptor", v14.pushDescriptor);  // storage images bound per dispatch
 }
 
-// What a physical device offers, as far as the GpuRegistry needs it.
+// What a physical device offers, as far as the GpuInstance needs it.
 struct DeviceSupport {
     std::uint32_t apiVersion = 0;
     std::optional<std::uint32_t> universalQueueFamily = std::nullopt;  // graphics + compute

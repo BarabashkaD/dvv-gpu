@@ -1,7 +1,7 @@
 #pragma once
 
-// Records the commands of one submission (spec §4, §5.3). The submit thread passes a recorder to
-// the function given to ExecutionContext::submit(); it is valid only during that call.
+// Records the commands of one submission. The submit thread passes a recorder to the function
+// given to submit() (context_vulkan.h); it is valid only during that call.
 //
 // Synchronisation is automatic and conservative: before every work command and before raw() a
 // global memory barrier makes all earlier writes of compute shaders and transfers (also of earlier
@@ -45,6 +45,20 @@ struct RawCommands {
     PFN_vkGetDeviceProcAddr getDeviceProcAddr = nullptr;
 };
 
+// A byte range to copy between two buffers (CommandRecorder::copyBuffer).
+struct BufferCopy {
+    std::uint64_t sourceOffset = 0;
+    std::uint64_t destinationOffset = 0;
+    std::uint64_t size = 0;  // bytes; 0 fails the recorder ("the size is 0")
+};
+
+// Work groups of a dispatch; each count is 1 to the device's maxComputeWorkGroupCount.
+struct GroupCount {
+    std::uint32_t x = 1;
+    std::uint32_t y = 1;
+    std::uint32_t z = 1;
+};
+
 class CommandRecorder {
 public:
     CommandRecorder(const CommandRecorder&) = delete;
@@ -53,19 +67,25 @@ public:
     CommandRecorder& operator=(CommandRecorder&&) = delete;
     ~CommandRecorder() = default;
 
-    // Runs the pipeline's shader on group_count_x x y x z work groups with these push-constant
-    // bytes, which must be exactly the pipeline's push-constant size (std::as_bytes of the
-    // shader's push-constant struct). Group counts are 1 to the device's maxComputeWorkGroupCount.
+    // Runs the pipeline's shader on `groups` work groups with these push-constant bytes, which
+    // must be exactly the pipeline's push-constant size (std::as_bytes of the shader's
+    // push-constant struct). Group counts are 1 to the device's maxComputeWorkGroupCount.
     // The pipeline must bind no storage images.
     void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
-                  std::uint32_t group_count_x, std::uint32_t group_count_y = 1,
-                  std::uint32_t group_count_z = 1);
+                  GroupCount groups);
     // As dispatch() above, and binds exactly pipeline.bindings().storageImages images, binding i =
     // storage_images[i]. Each image belongs to this device and generation, has STORAGE usage and
     // appears once. Images not yet in GENERAL move there in the automatic barrier (tracked like
     // every GpuImage layout); then the descriptors are pushed (vkCmdPushDescriptorSet, set 0) and
     // the dispatch is recorded. Otherwise the recorder fails (Errc::Internal). A bound image is
     // writable by the shader: do not bind an image others read (M4 adds read-only bindings).
+    void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
+                  std::span<GpuImage* const> storage_images, GroupCount groups);
+    // Deprecated (0.3.0): use the GroupCount forms above; removed in 1.0.0. These trailing-count
+    // forms forward to them with GroupCount{x, y, z}.
+    void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
+                  std::uint32_t group_count_x, std::uint32_t group_count_y = 1,
+                  std::uint32_t group_count_z = 1);
     void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
                   std::span<GpuImage* const> storage_images, std::uint32_t group_count_x,
                   std::uint32_t group_count_y = 1, std::uint32_t group_count_z = 1);
@@ -76,7 +96,10 @@ public:
                     std::uint64_t size = VK_WHOLE_SIZE);
     // Copies the whole source buffer to the start of the destination.
     void copyBuffer(const GpuBuffer& source, const GpuBuffer& destination);
-    // Copies `size` bytes. Source needs TRANSFER_SRC, destination TRANSFER_DST usage.
+    // Copies region.size bytes. Source needs TRANSFER_SRC, destination TRANSFER_DST usage.
+    void copyBuffer(const GpuBuffer& source, const GpuBuffer& destination, BufferCopy region);
+    // Deprecated (0.3.0): use the BufferCopy form above; removed in 1.0.0. This five-value form
+    // forwards to it.
     void copyBuffer(const GpuBuffer& source, std::uint64_t source_offset,
                     const GpuBuffer& destination, std::uint64_t destination_offset,
                     std::uint64_t size);
@@ -93,7 +116,7 @@ public:
     // Moves the image to a layout (nothing when it is already there): GENERAL,
     // TRANSFER_SRC_OPTIMAL or TRANSFER_DST_OPTIMAL (the image needs that transfer usage) or
     // SHADER_READ_ONLY_OPTIMAL (it needs SAMPLED usage); other layouts fail the recorder.
-    // GpuImage::layout() reports the new layout once the submission is on the queue.
+    // vulkanLayout() (context_vulkan.h) reports the new layout once the submission is queued.
     void transition(GpuImage& image, VkImageLayout layout);
 
     // The command buffer for commands of one's own, after the automatic barrier. The caller

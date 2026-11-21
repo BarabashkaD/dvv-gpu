@@ -1,7 +1,7 @@
 #pragma once
 
-// Fault injection for tests and rawreel-gui's --selftest lost (design M3 D8). Part of the main
-// dvv_gpu library, because the GUI selftest is the shipped binary.
+// Fault injection for tests and for an application's self-test of device loss. Part of the main
+// dvv_gpu library, so that a shipped binary can run such a self-test.
 
 namespace dvv::gpu {
 class ExecutionContext;
