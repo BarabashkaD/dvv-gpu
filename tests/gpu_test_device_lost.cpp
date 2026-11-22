@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "access.h"
+#include "device_core.h"
 #include "dvv/base/error.h"
 #include "dvv/base/executor.h"
 #include "dvv/base/log.h"
@@ -118,9 +120,6 @@ TEST_CASE_FIXTURE(GpuTest, "creators refuse a lost context") {
                                                .name = "lost"});
     REQUIRE_FALSE(image.has_value());
     CHECK(image.error().code == Errc::DeviceLost);
-    const auto pool = context().createResourcePool();
-    REQUIRE_FALSE(pool.has_value());
-    CHECK(pool.error().code == Errc::DeviceLost);
     const auto pipeline =
         createComputePipeline(context(), test_shaders::addOne(), ADD_ONE_PUSH_SIZE);
     REQUIRE_FALSE(pipeline.has_value());
@@ -145,7 +144,7 @@ TEST_CASE_FIXTURE(GpuTest, "objects released after an injection are freed by the
     buffer.reset();
     // The real device is healthy, so the idle wait succeeds and frees what was retired.
     REQUIRE(context().drain().has_value());
-    CHECK(context().retireStats().retiring == 0);
+    CHECK(dvv::gpu::detail::Access::core(context()).retireStats().retiring == 0);
 }
 
 TEST_CASE_FIXTURE(GpuTest,

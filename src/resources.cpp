@@ -1,7 +1,6 @@
 #include "dvv/gpu/resources.h"
 
 #include <cstdint>
-#include <string_view>
 #include <utility>
 
 #include "access.h"
@@ -11,18 +10,17 @@
 namespace dvv::gpu {
 
 static_assert(ManagedType<GpuBuffer>);
-static_assert(ManagedType<GpuImage>);
 
 namespace {
 
-// The body of GpuBuffer::flush(), shared with MappedWrite::flush().
+// The body of MappedWrite::flush().
 Result<void> flushAllocation(detail::DeviceCore& core, VmaAllocation_T* allocation,
                              std::uint64_t offset, std::uint64_t size) {
     return detail::vkCheck(vmaFlushAllocation(core.allocator(), allocation, offset, size),
                            "vmaFlushAllocation");
 }
 
-// The body of GpuBuffer::invalidate(), shared with mapRead().
+// The body of GpuBuffer::mapRead().
 Result<void> invalidateAllocation(detail::DeviceCore& core, VmaAllocation_T* allocation,
                                   std::uint64_t offset, std::uint64_t size) {
     return detail::vkCheck(vmaInvalidateAllocation(core.allocator(), allocation, offset, size),
@@ -100,43 +98,7 @@ Result<MappedRead> GpuBuffer::mapRead() const {
     return MappedRead(mapped_);
 }
 
-Result<void> GpuBuffer::flush(std::uint64_t offset, std::uint64_t size) {
-    return flushAllocation(*core_, allocation_, offset, size);
-}
-
-Result<void> GpuBuffer::invalidate(std::uint64_t offset, std::uint64_t size) {
-    return invalidateAllocation(*core_, allocation_, offset, size);
-}
-
 DeviceId GpuBuffer::deviceId() const noexcept {
-    return core_->id();
-}
-
-GpuImage::GpuImage(CreationKey<ExecutionContext> key, std::shared_ptr<detail::DeviceCore> core,
-                   ImageDesc desc, VkImage image, VmaAllocation_T* allocation,
-                   VkImageView view) noexcept
-    : Managed(std::move(key)),
-      core_(std::move(core)),
-      desc_(std::move(desc)),
-      image_(image),
-      allocation_(allocation),
-      view_(view),
-      generation_(core_->generation()) {}
-
-GpuImage::~GpuImage() {
-    // The retire queue frees in order, so the view is never destroyed after its image.
-    if (view_ != VK_NULL_HANDLE) {
-        core_->retire(vk::ImageView(view_), nullptr);
-    }
-    core_->retire(vk::Image(image_), allocation_);
-    core_->collect();
-}
-
-std::string_view GpuImage::name() const noexcept {
-    return desc_.name;
-}
-
-DeviceId GpuImage::deviceId() const noexcept {
     return core_->id();
 }
 

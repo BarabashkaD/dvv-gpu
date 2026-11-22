@@ -2,9 +2,53 @@
 
 All notable changes to dvv-gpu. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning with
-the dvv rules: compatible = the same major and at least the minimum version, also for 0.x; breaking
-changes only in a new major, after a deprecation. This file is the release notes (there are no
-GitHub Releases).
+the dvv rules: compatible = the same 0.minor and at least the minimum version; a replaced or
+unused API is removed in the next 0.x minor, with no deprecation period. This file is the release
+notes (there are no GitHub Releases).
+
+## [0.4.0] - 2026-11-22
+
+### Removed
+- `GpuRegistry`, `GpuRegistryOptions`, `dvv/gpu/gpu_registry.h` and `ExecutionContext::registry()`.
+  `GpuInstance`, `GpuInstanceOptions`, `ValidationMode` and `validationModeName` are declared in
+  `dvv/gpu/gpu_instance.h`; `dvv/gpu/gpu_fwd.h` declares `class GpuInstance;`.
+- The `ExecutionContext` members `createBuffer`, `createImage`, both `createComputePipeline`,
+  `formatFeatures`, `submit`, `createPresenter` and `createResourcePool`. The free functions of
+  context_vulkan.h and presenter_vulkan.h are the only creators.
+- `ResourcePool`, `ResourcePoolStats` and `dvv/gpu/resource_pool.h`.
+- `ExecutionContext::retireStats()` and `RetireStats`.
+- `PresentFrameInfo` and its `format` field; `PresenterOptions::frames`; `Presenter::setVisible`.
+- `GpuBuffer::mapped()`, `flush()` and `invalidate()`: use `mapWrite()` with `MappedWrite::flush()`,
+  and `mapRead()`.
+- `GpuImage::desc()`, `format()`, `handle()`, `view()` and `layout()` (use `vulkanDesc`,
+  `vulkanFormat`, `vulkanHandle`, `vulkanView` and `vulkanLayout` in context_vulkan.h) and its
+  public `enable_shared_from_this` base.
+- The five-value `CommandRecorder::copyBuffer` and the `dispatch` overloads with trailing group
+  counts: use the `BufferCopy` and `GroupCount` forms.
+
+### Changed
+- Requires dvv-build 0.6.0, dvv-base 0.6.0 and dvv-platform 0.4.0.
+- `PresenterOptions::window` is a `dvv::platform::WindowHandle`, built with `windowHandleOf()`
+  of the window system's header, e.g. `windowHandleOf(Win32Window{...})`.
+- `GpuImage` is declared in `dvv/gpu/image.h`. `PresentFrame` and `FrameProvider` are declared in
+  presenter_vulkan.h.
+- gpu_instance.h, execution_context.h, presenter.h and image.h include no Vulkan header, and no
+  longer include resources.h, submission.h, compute_pipeline.h, command_recorder.h or
+  embedded_shader.h. execution_context.h, and gpu_instance.h through it, also no longer include
+  presenter.h, image.h, dvv/base/executor.h, dvv/base/move_only_function.h,
+  dvv/platform/pixel_size.h, `<atomic>`, `<coroutine>`, `<cstddef>` or `<utility>`;
+  execution_context.h also drops dvv/platform/window_handle.h and `<optional>`. Code includes the
+  header that declares each name it uses: code that names `GpuBuffer`, `BufferDesc`, `ImageDesc`,
+  `GpuImage`, `RecordFunction`, `SubmitOperation`, `ComputePipeline`, `CommandRecorder`,
+  `EmbeddedShader`, `Presenter`, `PresenterOptions`, `PresenterStats`, `PresentFrameParams`,
+  `PresentEncoding`, `IExecutor` or a Vulkan type includes the header that declares it, or
+  context_vulkan.h or presenter_vulkan.h.
+- `PresentFrameParams` has four fields (`extent`, `frameNumber`, `previousFrameCompleted`,
+  `encoding`), so a structured binding of it needs four names.
+- Leak reports and live-object lists name the GPU instance `dvv::gpu::GpuInstance` (was
+  `dvv::gpu::GpuRegistry`).
+- The CMake package accepts a request for the same 0.minor only (`SameMinorVersion`):
+  `find_package(dvv_gpu 0.4)`.
 
 ## [0.3.0] - 2026-11-21
 

@@ -1,14 +1,11 @@
 // The M1a demo (spec §15): a compute shader built by slangc changes a buffer on the GPU.
 #include <doctest/doctest.h>
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <latch>
 #include <memory>
 #include <span>
-#include <thread>
 #include <vector>
 
 #include "dvv/base/error.h"
@@ -16,7 +13,6 @@
 #include "dvv/gpu/compute_pipeline.h"
 #include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/execution_context.h"
-#include "dvv/gpu/resource_pool.h"
 #include "dvv/gpu/resources.h"
 #include "gpu_fixture.h"
 #include "test_shaders/add_one.h"
@@ -96,22 +92,38 @@ void addOne(CommandRecorder& recorder, const ComputePipeline& pipeline, const Gp
     recorder.dispatch(pipeline, std::as_bytes(std::span(&push, 1)), GroupCount{GROUPS});
 }
 
-// Overload safety (compile time only): every call form of the old trailing-count dispatch and the
-// braced GroupCount forms resolves to exactly one overload.
+// Overload safety (compile time only): every braced GroupCount call form resolves to exactly one
+// overload.
 template <class Recorder>
 concept DispatchCallForms =
     requires(Recorder& recorder, const dvv::gpu::ComputePipeline& pipeline,
              std::span<const std::byte> bytes, std::span<dvv::gpu::GpuImage* const> images) {
-        recorder.dispatch(pipeline, bytes, 8);
-        recorder.dispatch(pipeline, bytes, 8, 8);
         recorder.dispatch(pipeline, bytes, {8, 8});
         recorder.dispatch(pipeline, bytes, {8});
-        recorder.dispatch(pipeline, bytes, images, 8);
-        recorder.dispatch(pipeline, bytes, images, 8, 8);
         recorder.dispatch(pipeline, bytes, images, {8, 8});
         recorder.dispatch(pipeline, bytes, images, {8});
     };
 static_assert(DispatchCallForms<dvv::gpu::CommandRecorder>);
+
+// The trailing-count forms are gone: an integer does not convert to GroupCount.
+template <class Recorder>
+concept TrailingCountDispatch =
+    requires(Recorder& recorder, const dvv::gpu::ComputePipeline& pipeline,
+             std::span<const std::byte> bytes) { recorder.dispatch(pipeline, bytes, 8); };
+static_assert(!TrailingCountDispatch<dvv::gpu::CommandRecorder>);
+
+template <class Recorder>
+concept TrailingCountImageDispatch = requires(
+    Recorder& recorder, const dvv::gpu::ComputePipeline& pipeline, std::span<const std::byte> bytes,
+    std::span<dvv::gpu::GpuImage* const> images) { recorder.dispatch(pipeline, bytes, images, 8); };
+static_assert(!TrailingCountImageDispatch<dvv::gpu::CommandRecorder>);
+
+// The five-value copyBuffer is gone: a copy names its range with BufferCopy.
+template <class Recorder>
+concept FiveValueCopy = requires(Recorder& recorder, const dvv::gpu::GpuBuffer& buffer) {
+    recorder.copyBuffer(buffer, 0, buffer, 0, 4);
+};
+static_assert(!FiveValueCopy<dvv::gpu::CommandRecorder>);
 
 }  // namespace
 
@@ -151,88 +163,28 @@ TEST_CASE_FIXTURE(GpuTest, "a dispatch sees the writes of the dispatch before it
     CHECK(mismatches(values, expected(2)) == 0);
 }
 
-TEST_CASE_FIXTURE(GpuTest, "a pooled buffer is reused once the GPU has finished with it") {
-    const auto pipeline =
-        createComputePipeline(context(), test_shaders::addOne(), sizeof(AddOne)).value();
-    const auto pool = context().createResourcePool().value();
-    auto lease = pool->acquireBuffer(VALUES).value();
-    const VkBuffer handle = lease->handle();
-    write(*lease, expected(0));
-
-    // The dispatch uses the buffer by device address only: the pool, not the recorder, keeps the
-    // buffer from being handed out again while the GPU may still use it.
-    GpuBuffer* const borrowed = lease.get();
-    std::latch recording(1);
-    std::latch returned(1);
-    std::atomic<bool> recorded = false;
-    dvv::Result<std::uint64_t> result;
-    std::jthread submitting([&] {
-        result = submitAndWait([&](CommandRecorder& recorder) {
-            addOne(recorder, *pipeline, *borrowed);
-            recorded = true;
-            recording.count_down();
-            returned.wait();  // the test returns the buffer meanwhile
-        });
-        if (!recorded) {
-            recording.count_down();  // the submission failed before recording: do not hang
-        }
-    });
-    recording.wait();
-    // Nothing may throw before returned.count_down(): unwinding would join `submitting` while it
-    // waits for `returned`. The results are checked after the join.
-    lease.reset();  // back in the pool while its submission is being recorded
-    const std::size_t free_while_recording = pool->stats().free;
-    const auto other = pool->acquireBuffer(VALUES);
-    returned.count_down();
-    submitting.join();
-    REQUIRE(result.has_value());
-    CHECK(free_while_recording == 1);
-    REQUIRE(other.has_value());
-    CHECK((*other)->handle() != handle);
-
-    // The submission has finished: the buffer is handed out again, with what the GPU left in it.
-    const auto again = pool->acquireBuffer(VALUES).value();
-    CHECK(again->handle() == handle);
-    CHECK(mismatches(read(*again), expected(1)) == 0);
-    const auto stats = pool->stats();
-    CHECK(stats.created == 2);
-    CHECK(stats.reused == 1);
-    CHECK(stats.leased == 2);
-    CHECK(stats.free == 0);
-
-    REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
-                addOne(recorder, *pipeline, *again);
-            }).has_value());
-    CHECK(mismatches(read(*again), expected(2)) == 0);
-}
-
 // The shader indexes by the x group only, so the y count stays 1 (a larger y would repeat every
 // write and race).
-TEST_CASE_FIXTURE(GpuTest, "a GroupCount dispatch equals the three-integer dispatch") {
+TEST_CASE_FIXTURE(GpuTest, "a named and a braced GroupCount dispatch write the same values") {
     constexpr std::uint32_t X_GROUPS = 2;
     constexpr std::uint32_t WRITTEN = X_GROUPS * GROUP_SIZE;
     const auto pipeline =
         createComputePipeline(context(), test_shaders::addOne(), sizeof(AddOne)).value();
     const auto named = createBuffer(context(), VALUES).value();
     const auto braced = createBuffer(context(), VALUES).value();
-    const auto old_form = createBuffer(context(), VALUES).value();
     write(*named, expected(0));
     write(*braced, expected(0));
-    write(*old_form, expected(0));
     const AddOne named_push{.data = named->deviceAddress(), .count = WRITTEN};
     const AddOne braced_push{.data = braced->deviceAddress(), .count = WRITTEN};
-    const AddOne old_push{.data = old_form->deviceAddress(), .count = WRITTEN};
 
     REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
                 recorder.dispatch(*pipeline, std::as_bytes(std::span(&named_push, 1)),
                                   GroupCount{X_GROUPS, 1});
                 recorder.dispatch(*pipeline, std::as_bytes(std::span(&braced_push, 1)),
                                   {X_GROUPS, 1});
-                recorder.dispatch(*pipeline, std::as_bytes(std::span(&old_push, 1)), X_GROUPS, 1);
             }).has_value());
     const std::vector<std::uint32_t> from_named = read(*named);
     CHECK(from_named == read(*braced));
-    CHECK(from_named == read(*old_form));
     CHECK(from_named[WRITTEN - 1] == ((WRITTEN - 1) * 3) + 1);
     CHECK(from_named[WRITTEN] == (WRITTEN * 3));
 }

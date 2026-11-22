@@ -136,9 +136,9 @@ TEST_CASE_FIXTURE(GpuTest, "a compute pipeline is made from an embedded shader")
     CHECK(pipeline->ownerId() == context().objectId());
     CHECK(pipeline->typeName() == "dvv::gpu::ComputePipeline");
 
-    const auto before = context().retireStats();
+    const auto before = Access::core(context()).retireStats();
     pipeline.reset();  // nothing submitted: the pipeline and its layout are freed at once
-    const auto after = context().retireStats();
+    const auto after = Access::core(context()).retireStats();
     CHECK(after.retired == before.retired + 2);
     CHECK(after.freed == before.freed + 2);
 }
@@ -321,7 +321,7 @@ TEST_CASE_FIXTURE(GpuTest, "a corrupt, damaged or foreign pipeline cache file is
     // A damaged payload behind an intact header: the checksum no longer matches.
     REQUIRE(saved.size() >= CACHE_HEADER_BYTES);
     std::vector<std::byte> damaged = saved;
-    dvv::gpu::detail::appendPipelineCacheTrailer(damaged);
+    dvv::gpu::detail::appendPipelineCacheTrailer(damaged, dvv::gpu::detail::fnv1a64(damaged));
     damaged[saved.size() - 1] ^= std::byte{0x01};
     writeFile(file, damaged);
     {
@@ -336,7 +336,7 @@ TEST_CASE_FIXTURE(GpuTest, "a corrupt, damaged or foreign pipeline cache file is
     // A well-formed cache of another vendor: this device's cache with a changed vendorID.
     std::vector<std::byte> foreign = saved;
     foreign[8] ^= std::byte{0xff};
-    dvv::gpu::detail::appendPipelineCacheTrailer(foreign);
+    dvv::gpu::detail::appendPipelineCacheTrailer(foreign, dvv::gpu::detail::fnv1a64(foreign));
     writeFile(file, foreign);
     auto ctx =
         gpuInstance().createContext(device(), ContextOptions{.pipelineCacheFile = file}).value();

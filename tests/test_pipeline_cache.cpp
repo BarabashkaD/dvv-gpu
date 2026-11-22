@@ -95,13 +95,13 @@ TEST_CASE("64-bit FNV-1a") {
 TEST_CASE("a pipeline cache file is the driver data with a dvv trailer") {
     const std::vector<std::byte> payload = cacheData(DEVICE);
     std::vector<std::byte> file = payload;
-    appendPipelineCacheTrailer(file);
+    appendPipelineCacheTrailer(file, dvv::gpu::detail::fnv1a64(file));
     REQUIRE(file.size() == payload.size() + PIPELINE_CACHE_TRAILER_SIZE);
     CHECK(pipelineCacheTrailerMismatch(file) == std::nullopt);
     CHECK(std::equal(payload.begin(), payload.end(), file.begin()));
 
     std::vector<std::byte> empty;
-    appendPipelineCacheTrailer(empty);
+    appendPipelineCacheTrailer(empty, dvv::gpu::detail::fnv1a64(empty));
     CHECK(pipelineCacheTrailerMismatch(empty) == std::nullopt);
 }
 
@@ -110,7 +110,7 @@ TEST_CASE("a pipeline cache file with a missing or broken dvv trailer is refused
     CHECK(pipelineCacheTrailerMismatch(cacheData(DEVICE)) == "it has no dvv trailer");
 
     std::vector<std::byte> file = cacheData(DEVICE);
-    appendPipelineCacheTrailer(file);
+    appendPipelineCacheTrailer(file, dvv::gpu::detail::fnv1a64(file));
     std::vector<std::byte> truncated(file.begin() + 1, file.end());  // lost its first byte
     CHECK(pipelineCacheTrailerMismatch(truncated) ==
           "the dvv trailer gives 96 bytes of data, the file has 95");

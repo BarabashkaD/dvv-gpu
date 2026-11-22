@@ -11,8 +11,6 @@ add_executable(dvv_gpu_tests
     main.cpp
     test_bundled_drivers.cpp
     test_device_id.cpp
-    test_free_list.cpp
-    test_gpu_fwd.cpp
     test_gpu_info.cpp
     test_loader.cpp
     test_neutral_headers.cpp
@@ -85,10 +83,9 @@ add_executable(dvv_gpu_device_tests
     gpu_test_context.cpp
     gpu_test_device_lost.cpp
     gpu_test_images.cpp
+    gpu_test_instance.cpp
     gpu_test_pipeline.cpp
     gpu_test_present_blit.cpp
-    gpu_test_registry.cpp
-    gpu_test_resource_pool.cpp
     gpu_test_resources.cpp
     gpu_test_submission.cpp)
 # White-box tests reach VMA through the private headers.
@@ -169,10 +166,9 @@ if(NOT DVV_SANITIZE)
 endif()
 
 # Compile-fail tests (spec §9.4), run by dvv-base's shared runner. Case 0 is the control and must
-# build; cases 1-10 must fail to compile with the expected diagnostic: a forged GPU instance key, a
-# GPU instance, a context, a buffer, an image, a resource pool, a compute pipeline or a presenter
-# constructed without a key, a buffer written through a const holder, and a MappedWrite made outside
-# its buffer.
+# build; cases 1-9 must fail to compile with the expected diagnostic: a forged GPU instance key, a
+# GPU instance, a context, a buffer, an image, a compute pipeline or a presenter constructed without
+# a key, a buffer written through a const holder, and a MappedWrite made outside its buffer.
 set(compile_fail_source ${CMAKE_CURRENT_SOURCE_DIR}/compile_fail/direct_construction.cpp)
 add_executable(dvv_gpu_compile_ok ${compile_fail_source})
 target_compile_definitions(dvv_gpu_compile_ok PRIVATE DVV_COMPILE_FAIL_CASE=0)
@@ -180,20 +176,19 @@ target_link_libraries(dvv_gpu_compile_ok PRIVATE dvv::gpu)
 dvv_set_compiler_options(dvv_gpu_compile_ok)
 if(MSVC)
     set(compile_fail_patterns "C2248" "C2665" "C2661" "C2665: 'dvv::gpu::GpuBuffer::GpuBuffer'"
-        "C2665: 'dvv::gpu::GpuImage::GpuImage'" "C2661: 'dvv::gpu::ResourcePool::ResourcePool'"
+        "C2665: 'dvv::gpu::GpuImage::GpuImage'"
         "C2661: 'dvv::gpu::ComputePipeline::ComputePipeline'"
         "C2661: 'dvv::gpu::Presenter::Presenter'" "C2662" "C2248")
 else()
     set(compile_fail_patterns "private" "no matching constructor" "no matching constructor"
         "no matching constructor for initialization of 'dvv::gpu::GpuBuffer'"
         "no matching constructor for initialization of 'dvv::gpu::GpuImage'"
-        "no matching constructor for initialization of 'dvv::gpu::ResourcePool'"
         "no matching constructor for initialization of 'dvv::gpu::ComputePipeline'"
         "no matching constructor for initialization of 'dvv::gpu::Presenter'"
         "but function is not marked const"
         "calling a private constructor of class 'dvv::gpu::MappedWrite'")
 endif()
-foreach(case IN ITEMS 1 2 3 4 5 6 7 8 9 10)
+foreach(case IN ITEMS 1 2 3 4 5 6 7 8 9)
     set(target dvv_gpu_compile_fail_${case})
     add_executable(${target} EXCLUDE_FROM_ALL ${compile_fail_source})
     target_compile_definitions(${target} PRIVATE DVV_COMPILE_FAIL_CASE=${case})

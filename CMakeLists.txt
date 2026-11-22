@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.2)
-project(dvv_gpu VERSION 0.3.0 DESCRIPTION "dvv GPU core" LANGUAGES CXX)
+project(dvv_gpu VERSION 0.4.0 DESCRIPTION "dvv GPU core" LANGUAGES CXX)
 # Version string; a pre-release build adds its release-stage label (user decision U-M4ORDER).
 set(dvv_gpu_VERSION_STRING "${PROJECT_VERSION}")
 
@@ -15,7 +15,7 @@ if(NOT DVV_BUILD_CMAKE_DIR OR NOT IS_ABSOLUTE "${DVV_BUILD_CMAKE_DIR}"
                         "-DDVV_BUILD_CMAKE_DIR=<absolute path of dvv-build>/cmake")
 endif()
 include("${DVV_BUILD_CMAKE_DIR}/DvvDeps.cmake")
-# Adds dvv-base and dvv-platform (native windows, run-time libraries; dvv-deps.txt) and checks
+# Adds dvv-base and dvv-platform (window handles, run-time libraries; dvv-deps.txt) and checks
 # their versions; a stand-alone build tests only this repository.
 dvv_dependencies()
 
@@ -54,14 +54,14 @@ add_library(dvv_gpu STATIC
     src/execution_context.cpp
     src/fault_injection.cpp
     src/gpu_info.cpp
-    src/gpu_registry.cpp
+    src/gpu_instance.cpp
+    src/image.cpp
     src/instance.cpp
     src/loader.cpp
     src/pipeline_cache.cpp
     src/presenter.cpp
     src/presenter_core.cpp
     src/presenter_logic.cpp
-    src/resource_pool.cpp
     src/resources.cpp
     src/submitter.cpp
     src/surface_vulkan.cpp
@@ -111,7 +111,7 @@ install(EXPORT dvv_gpuTargets NAMESPACE dvv:: DESTINATION ${config_dir})
 configure_package_config_file(cmake/dvv_gpuConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/dvv_gpuConfig.cmake INSTALL_DESTINATION ${config_dir})
 write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/dvv_gpuConfigVersion.cmake
-    COMPATIBILITY SameMajorVersion)
+    COMPATIBILITY SameMinorVersion)
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/dvv_gpuConfig.cmake
     ${CMAKE_CURRENT_BINARY_DIR}/dvv_gpuConfigVersion.cmake

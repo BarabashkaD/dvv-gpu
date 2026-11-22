@@ -44,15 +44,6 @@ std::uint64_t readQuad(std::span<const std::byte> data, std::size_t offset) noex
     return quad;
 }
 
-void appendTrailer(std::vector<std::byte>& data, std::uint64_t checksum) {
-    const std::uint64_t size = data.size();
-    const std::size_t at = data.size();
-    data.resize(at + PIPELINE_CACHE_TRAILER_SIZE);
-    std::memcpy(data.data() + at, &size, sizeof(size));
-    std::memcpy(data.data() + at + 8, &checksum, sizeof(checksum));
-    std::memcpy(data.data() + at + 16, TRAILER_MAGIC, sizeof(TRAILER_MAGIC));
-}
-
 // The whole file; nullopt (with the reason in `problem`) when it cannot be read or is too large.
 std::optional<std::vector<std::byte>> readFile(const std::filesystem::path& file,
                                                std::string& problem) {
@@ -144,8 +135,13 @@ std::uint64_t fnv1a64(std::span<const std::byte> data) noexcept {
     return hash;
 }
 
-void appendPipelineCacheTrailer(std::vector<std::byte>& data) {
-    appendTrailer(data, fnv1a64(data));
+void appendPipelineCacheTrailer(std::vector<std::byte>& data, std::uint64_t checksum) {
+    const std::uint64_t size = data.size();
+    const std::size_t at = data.size();
+    data.resize(at + PIPELINE_CACHE_TRAILER_SIZE);
+    std::memcpy(data.data() + at, &size, sizeof(size));
+    std::memcpy(data.data() + at + 8, &checksum, sizeof(checksum));
+    std::memcpy(data.data() + at + 16, TRAILER_MAGIC, sizeof(TRAILER_MAGIC));
 }
 
 std::optional<std::string> pipelineCacheTrailerMismatch(std::span<const std::byte> file) {
@@ -283,7 +279,7 @@ Result<void> PipelineCache::store(bool only_if_changed) {
             return {};
         }
     }
-    appendTrailer(data, current.checksum);
+    appendPipelineCacheTrailer(data, current.checksum);
     if (Result<void> written = writeFile(file_, data); !written) {
         return saveError(std::move(written).error());
     }

@@ -8,7 +8,7 @@
 
 #include "dvv/base/error.h"
 #include "dvv/gpu/gpu_instance.h"
-#include "dvv/platform/native_window.h"
+#include "dvv/platform/window_handle.h"
 #include "instance.h"
 
 using dvv::gpu::GpuInstanceOptions;

@@ -7,7 +7,7 @@
 
 #include <vulkan/vulkan_core.h>
 
-#include "dvv/platform/native_window.h"
+#include "dvv/platform/pixel_size.h"
 #include "presenter_core.h"
 
 using dvv::gpu::detail::chooseSurfaceFormat;

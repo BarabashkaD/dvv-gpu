@@ -10,6 +10,7 @@
 
 #include <vulkan/vulkan_core.h>
 
+#include "access.h"
 #include "dvv/gpu/command_recorder.h"
 #include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/device_id.h"
@@ -17,6 +18,12 @@
 #include "dvv/gpu/resources.h"
 
 namespace dvv::gpu::test {
+
+SurfaceInputs surfaceInputs(const GpuInstance& gpu_instance) {
+    const detail::InstanceCore& core = detail::Access::instance(gpu_instance);
+    return {.instance = static_cast<VkInstance>(core.instance()),
+            .getInstanceProcAddr = core.dispatch().vkGetInstanceProcAddr};
+}
 
 void ErrorLog::add(const Error& error) {
     const std::lock_guard lock(mutex_);
@@ -127,10 +134,9 @@ PresentTest::~PresentTest() {
 }
 
 PresenterOptions PresentTest::options() {
-    return {.window = window().native(),
+    return {.window = window().handle(),
             .extent = window().clientSize(),
             .visible = true,
-            .frames = {},
             .onError =
                 [log = errors_](const Error& error) noexcept {
                     try {

@@ -15,6 +15,10 @@ namespace dvv::gpu {
 
 class ExecutionContext;
 
+namespace detail {
+struct Access;
+}  // namespace detail
+
 // The record function of a submission; runs on the context's submit thread.
 using RecordFunction = MoveOnlyFunction<void(CommandRecorder&)>;
 
@@ -39,7 +43,7 @@ public:
     [[nodiscard]] Result<std::uint64_t> await_resume() noexcept { return std::move(result_); }
 
 private:
-    friend class ExecutionContext;
+    friend struct detail::Access;
 
     SubmitOperation(std::shared_ptr<ExecutionContext> context, IExecutor& resume_on,
                     RecordFunction record) noexcept;
