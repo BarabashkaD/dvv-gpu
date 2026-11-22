@@ -78,7 +78,7 @@ public:
     [[nodiscard]] bool inFlight() const noexcept { return phase_ == Phase::InFlight; }
     // For PresentFrameParams: true only when the previous provider call's frame completed.
     [[nodiscard]] bool previousFrameCompleted() const noexcept { return previous_completed_; }
-    // The GUI's latest size hint (used for swapchain creation when currentExtent is 0xFFFFFFFF).
+    // The GUI's latest size hint (the tests read it).
     [[nodiscard]] platform::PixelSize extentHint() const noexcept { return extent_; }
 
 private:

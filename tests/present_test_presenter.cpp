@@ -2,17 +2,19 @@
 
 #include <chrono>
 #include <cstdint>
+#include <format>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include <vulkan/vulkan_core.h>
 
+#include "access.h"
+#include "device_core.h"
 #include "dvv/base/error.h"
 #include "dvv/base/lifetime.h"
 #include "dvv/gpu/device_id.h"
@@ -20,14 +22,14 @@
 #include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/presenter.h"
 #include "dvv/gpu/presenter_vulkan.h"
-#include "dvv/platform/native_window.h"
 #include "dvv/platform/testing/test_window.h"
+#include "dvv/platform/window_handle.h"
 #include "present_blit.h"
 #include "present_fixture.h"
+#include "presenter_core.h"
+#include "surface_vulkan.h"
 
 namespace dvv::gpu::test {
-
-static_assert(std::is_same_v<PresentFrameInfo, PresentFrameParams>);
 
 namespace {
 
@@ -62,7 +64,6 @@ TEST_CASE_FIXTURE(PresentTest, "a presenter presents frames at the window's size
 
 TEST_CASE_FIXTURE(PresentTest, "the per-call encoding matches the swapchain format") {
     struct Record {
-        VkFormat format = VK_FORMAT_UNDEFINED;
         PresentEncoding encoding = PresentEncoding::Linear;
     };
     // The provider runs on the presenter thread, the checks on the test thread.
@@ -73,7 +74,7 @@ TEST_CASE_FIXTURE(PresentTest, "the per-call encoding matches the swapchain form
          frames = provider()](const PresentFrameParams& params) mutable -> Result<PresentFrame> {
         {
             const std::lock_guard lock(mutex);
-            records.push_back({.format = params.format, .encoding = params.encoding});
+            records.push_back({.encoding = params.encoding});
         }
         return frames(params);
     };
@@ -87,12 +88,40 @@ TEST_CASE_FIXTURE(PresentTest, "the per-call encoding matches the swapchain form
         return (*presenter)->stats().framesPresented >= 3;
     }));
     presenter->reset();  // no provider call after this
+    // The format the swapchain takes: the choice over the surface's formats.
+    const SurfaceInputs inputs = surfaceInputs(gpuInstance());
+    const auto surface =
+        detail::createSurface(inputs.instance, inputs.getInstanceProcAddr, window().handle());
+    REQUIRE(surface.has_value());
+    if (!surface) {
+        return;
+    }
+    const detail::DeviceCore& device = detail::Access::core(context());
+    const auto& api = device.dispatch();
+    std::vector<vk::SurfaceFormatKHR> listed_formats;
+    vk::Result listed = vk::Result::eIncomplete;
+    while (listed == vk::Result::eIncomplete) {
+        std::uint32_t count = 0;
+        REQUIRE(device.physicalDevice().getSurfaceFormatsKHR(static_cast<vk::SurfaceKHR>(*surface),
+                                                             &count, nullptr,
+                                                             api) == vk::Result::eSuccess);
+        listed_formats.resize(count);
+        listed = device.physicalDevice().getSurfaceFormatsKHR(static_cast<vk::SurfaceKHR>(*surface),
+                                                              &count, listed_formats.data(), api);
+        listed_formats.resize(count);
+    }
+    REQUIRE(listed == vk::Result::eSuccess);
+    const std::vector<VkSurfaceFormatKHR> formats(listed_formats.begin(), listed_formats.end());
+    const std::optional<VkSurfaceFormatKHR> f = detail::chooseSurfaceFormat(formats);
+    REQUIRE(f);
+    // Before the window goes.
+    api.vkDestroySurfaceKHR(inputs.instance, *surface, nullptr);
     const std::lock_guard lock(mutex);
     REQUIRE(records.size() >= 3);
-    for (const Record& record : records) {
-        CAPTURE(static_cast<int>(record.format));
-        CHECK(record.format != VK_FORMAT_UNDEFINED);
-        CHECK(record.encoding == detail::presentEncoding(record.format));
+    if (f) {
+        for (const Record& record : records) {
+            CHECK(record.encoding == detail::presentEncoding(f->format));
+        }
     }
     CHECK(errors().size() == 0);
 }
@@ -105,14 +134,14 @@ TEST_CASE("PresentFrameParams builds with and without encoding") {
                                            .previousFrameCompleted = false,
                                            .encoding = PresentEncoding::Srgb};
     CHECK(with_encoding.encoding == PresentEncoding::Srgb);
-    CHECK(with_encoding.format == VK_FORMAT_UNDEFINED);
-    const PresentFrameInfo old_designated{.extent = {},
-                                          .format = VK_FORMAT_B8G8R8A8_UNORM,
-                                          .frameNumber = 0,
-                                          .previousFrameCompleted = false};
-    CHECK(old_designated.encoding == PresentEncoding::Linear);
-    const PresentFrameInfo old_positional{{}, VK_FORMAT_UNDEFINED, 0, false};
-    CHECK(old_positional.encoding == PresentEncoding::Linear);
+    const auto [extent, frame_number, previous_completed, encoding] = with_encoding;
+    CHECK(extent.width == 0);
+    CHECK(frame_number == 0);
+    CHECK_FALSE(previous_completed);
+    CHECK(encoding == PresentEncoding::Srgb);
+    const PresentFrameParams without_encoding{
+        .extent = {}, .frameNumber = 0, .previousFrameCompleted = false};
+    CHECK(without_encoding.encoding == PresentEncoding::Linear);
 }
 
 // Design M1b §8.2 case 6: an unusable image skips the frame without failing the presenter. The
@@ -182,36 +211,36 @@ TEST_CASE_FIXTURE(PresentTest, "wrong configurations are refused with Internal")
     }
     SUBCASE("no window") {
         PresenterOptions no_window = options();
-        no_window.window = std::monostate{};
+        no_window.window = platform::WindowHandle{};
+        const std::string name = no_window.name;
         const auto result = createPresenter(context(), std::move(no_window), provider());
         REQUIRE_FALSE(result);
         CHECK(result.error().code == Errc::Internal);
+        CHECK(
+            result.error().message ==
+            std::format("presenter '{}': the window is no window, the GPU instance presents to {}",
+                        name, platform::windowSystemName(platform::defaultWindowSystem())));
     }
     SUBCASE("a window of the other platform") {
         PresenterOptions other = options();
-#if defined(_WIN32)
-        other.window = platform::XlibWindow{};
-#else
-        other.window = platform::Win32Window{};
-#endif
+        const platform::WindowSystem other_system =
+            platform::defaultWindowSystem() == platform::WindowSystem::Win32
+                ? platform::WindowSystem::Xlib
+                : platform::WindowSystem::Win32;
+        other.window = platform::WindowHandle::make(other_system, 1, 1);
+        const std::string name = other.name;
         const auto result = createPresenter(context(), std::move(other), provider());
         REQUIRE_FALSE(result);
         CHECK(result.error().code == Errc::Internal);
+        CHECK(result.error().message ==
+              std::format("presenter '{}': the window is {}, the GPU instance presents to {}", name,
+                          platform::windowSystemName(other_system),
+                          platform::windowSystemName(platform::defaultWindowSystem())));
     }
     SUBCASE("no frame provider") {
         const auto result = createPresenter(context(), options(), FrameProvider{});
         REQUIRE_FALSE(result);
         CHECK(result.error().code == Errc::Internal);
-    }
-    SUBCASE("two frame providers (0.3.x)") {
-        PresenterOptions with_frames = options();
-        with_frames.frames = provider();
-        const auto result = createPresenter(context(), std::move(with_frames), provider());
-        REQUIRE_FALSE(result);
-        CHECK(result.error().code == Errc::Internal);
-        INFO(result.error().message);
-        CHECK(result.error().message.find("two frame providers") != std::string::npos);
-        CHECK(livePresenters() == 0);
     }
     SUBCASE("presentation on a headless GPU instance") {
         const auto headless = GpuInstance::create({});
@@ -226,21 +255,19 @@ TEST_CASE_FIXTURE(PresentTest, "wrong configurations are refused with Internal")
     }
 }
 
-// Deleted at 1.0.0 with the member and PresenterOptions::frames.
-TEST_CASE_FIXTURE(PresentTest, "the deprecated member still creates a presenter (0.3.x)") {
-    PresenterOptions with_frames = options();
-    with_frames.frames = provider();
-    auto presenter = context().createPresenter(std::move(with_frames));
-    REQUIRE(presenter.has_value());
-    if (!presenter) {
-        return;
-    }
-    REQUIRE(pumpUntil(window(), [&] {
-        (*presenter)->requestFrame();
-        return (*presenter)->stats().framesPresented >= 1;
-    }));
-    CHECK_FALSE((*presenter)->failure());
-    CHECK(errors().size() == 0);
+// A handle of the right system made before its native window exists: the surface creator refuses
+// it.
+TEST_CASE_FIXTURE(PresentTest,
+                  "a window handle without a native window is refused with Unsupported") {
+    PresenterOptions null_window = options();
+    null_window.window = platform::WindowHandle::make(platform::defaultWindowSystem(), 0, 0);
+    const std::string name = null_window.name;
+    const auto result = createPresenter(context(), std::move(null_window), provider());
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == Errc::Unsupported);
+    CHECK(result.error().message.starts_with(
+        std::format("creating the window surface of presenter '{}'", name)));
+    CHECK(livePresenters() == 0);
 }
 
 // Design M1b §8.2 case 10.
@@ -258,10 +285,9 @@ TEST_CASE("a presenter's objects are gone after it is destroyed") {
     REQUIRE(window.has_value());
     auto presenter =
         createPresenter(**context,
-                        {.window = window->native(),
+                        {.window = window->handle(),
                          .extent = window->clientSize(),
                          .visible = true,
-                         .frames = {},
                          .onError = {},
                          .name = "present test"},
                         testFrameProvider(*context, std::make_shared<ProviderControl>()));

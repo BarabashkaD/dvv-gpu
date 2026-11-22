@@ -1,4 +1,4 @@
-#include "dvv/gpu/gpu_registry.h"
+#include "dvv/gpu/gpu_instance.h"
 
 #include <format>
 #include <utility>
@@ -38,7 +38,7 @@ Result<std::shared_ptr<GpuInstance>> GpuInstance::create(const GpuInstanceOption
         std::move(instance), std::move(enumeration.infos), std::move(ranked));
 }
 
-GpuRegistry::GpuRegistry(CreationKey<GpuInstance> key,
+GpuInstance::GpuInstance(CreationKey<GpuInstance> key,
                          std::unique_ptr<detail::InstanceCore> instance,
                          std::vector<GpuInfo> devices, std::vector<DeviceId> ranked) noexcept
     : Managed(std::move(key)),
@@ -46,7 +46,7 @@ GpuRegistry::GpuRegistry(CreationKey<GpuInstance> key,
       devices_(std::move(devices)),
       ranked_(std::move(ranked)) {}
 
-GpuRegistry::~GpuRegistry() = default;
+GpuInstance::~GpuInstance() = default;
 
 ValidationMode GpuInstance::validation() const noexcept {
     return instance_->validation();

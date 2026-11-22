@@ -279,7 +279,7 @@ TEST_CASE_FIXTURE(GpuTest, "pipeline bindings must fit the device and the shader
 }
 
 TEST_CASE_FIXTURE(GpuTest, "views and set layouts are retired and freed") {
-    const std::uint64_t freed_before = context().retireStats().freed;
+    const std::uint64_t freed_before = Access::core(context()).retireStats().freed;
     {
         const auto image =
             createImage(context(), storageImage(8, 8, VK_FORMAT_R16_UINT, "retired")).value();
@@ -291,7 +291,7 @@ TEST_CASE_FIXTURE(GpuTest, "views and set layouts are retired and freed") {
         CHECK(pipeline->setLayout() != VK_NULL_HANDLE);
     }
     REQUIRE(context().drain().has_value());
-    const auto stats = context().retireStats();
+    const auto stats = Access::core(context()).retireStats();
     // The image, its view, the pipeline, its layout and its set layout.
     CHECK(stats.freed == freed_before + 5);
     CHECK(stats.retiring == 0);

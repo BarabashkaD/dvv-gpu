@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -63,22 +64,6 @@ CommandRecorder::CommandRecorder(detail::DeviceCore& core, VkCommandBuffer comma
 void CommandRecorder::dispatch(const ComputePipeline& pipeline,
                                std::span<const std::byte> push_constants, GroupCount groups) {
     dispatch(pipeline, push_constants, std::span<GpuImage* const>{}, groups);
-}
-
-void CommandRecorder::dispatch(const ComputePipeline& pipeline,
-                               std::span<const std::byte> push_constants,
-                               std::uint32_t group_count_x, std::uint32_t group_count_y,
-                               std::uint32_t group_count_z) {
-    dispatch(pipeline, push_constants, GroupCount{group_count_x, group_count_y, group_count_z});
-}
-
-void CommandRecorder::dispatch(const ComputePipeline& pipeline,
-                               std::span<const std::byte> push_constants,
-                               std::span<GpuImage* const> storage_images,
-                               std::uint32_t group_count_x, std::uint32_t group_count_y,
-                               std::uint32_t group_count_z) {
-    dispatch(pipeline, push_constants, storage_images,
-             GroupCount{group_count_x, group_count_y, group_count_z});
 }
 
 void CommandRecorder::dispatch(const ComputePipeline& pipeline,
@@ -181,14 +166,6 @@ void CommandRecorder::fillBuffer(const GpuBuffer& buffer, std::uint32_t value, s
 void CommandRecorder::copyBuffer(const GpuBuffer& source, const GpuBuffer& destination) {
     copyBuffer(source, destination,
                {.sourceOffset = 0, .destinationOffset = 0, .size = source.size()});
-}
-
-void CommandRecorder::copyBuffer(const GpuBuffer& source, std::uint64_t source_offset,
-                                 const GpuBuffer& destination, std::uint64_t destination_offset,
-                                 std::uint64_t size) {
-    copyBuffer(
-        source, destination,
-        {.sourceOffset = source_offset, .destinationOffset = destination_offset, .size = size});
 }
 
 void CommandRecorder::copyBuffer(const GpuBuffer& source, const GpuBuffer& destination,
@@ -489,7 +466,9 @@ void CommandRecorder::barrier(std::span<GpuImage* const> images, VkImageLayout l
         if (recorded != layouts_.end()) {
             recorded->second = layout;
         } else {
-            layouts_.emplace_back(detail::Access::retain(*image), layout);
+            std::shared_ptr<GpuImage> retained = detail::Access::retain(*image);
+            assert(retained != nullptr);  // createImage set the weak self
+            layouts_.emplace_back(std::move(retained), layout);
         }
     }
     const vk::DependencyInfo dependency{

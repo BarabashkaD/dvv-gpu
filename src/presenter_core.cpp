@@ -139,7 +139,7 @@ PresenterCore::PresenterCore(ExecutionContext& context, std::shared_ptr<DeviceCo
       device_(std::move(device)),
       instance_(static_cast<VkInstance>(instance.instance())),
       get_instance_proc_addr_(instance.dispatch().vkGetInstanceProcAddr),
-      window_(platform::windowHandleOf(options.window)),
+      window_(options.window),
       frames_(std::move(frames)),
       on_error_(std::move(options.onError)),
       name_(std::move(options.name)),
@@ -375,7 +375,6 @@ void PresenterCore::step(Action action) {
 // design M1b §5.2 RenderFrame, steps 1-5.
 void PresenterCore::renderFrame() {
     const PresentFrameParams params{.extent = {.width = extent_.width, .height = extent_.height},
-                                    .format = format_.format,
                                     .frameNumber = frame_number_++,
                                     .previousFrameCompleted = logic_.previousFrameCompleted(),
                                     .encoding = encoding_};

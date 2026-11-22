@@ -27,6 +27,7 @@
 
 #include "dvv/base/error.h"
 #include "dvv/gpu/compute_pipeline.h"
+#include "dvv/gpu/image.h"
 #include "dvv/gpu/resources.h"
 
 namespace dvv::gpu {
@@ -81,14 +82,6 @@ public:
     // writable by the shader: do not bind an image others read (M4 adds read-only bindings).
     void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
                   std::span<GpuImage* const> storage_images, GroupCount groups);
-    // Deprecated (0.3.0): use the GroupCount forms above; removed in 1.0.0. These trailing-count
-    // forms forward to them with GroupCount{x, y, z}.
-    void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
-                  std::uint32_t group_count_x, std::uint32_t group_count_y = 1,
-                  std::uint32_t group_count_z = 1);
-    void dispatch(const ComputePipeline& pipeline, std::span<const std::byte> push_constants,
-                  std::span<GpuImage* const> storage_images, std::uint32_t group_count_x,
-                  std::uint32_t group_count_y = 1, std::uint32_t group_count_z = 1);
     // Fills `size` bytes from `offset` with a 32-bit value (VK_WHOLE_SIZE: to the end, rounded
     // down to a multiple of 4). The buffer needs VK_BUFFER_USAGE_TRANSFER_DST_BIT; offset and size
     // are multiples of 4.
@@ -98,11 +91,6 @@ public:
     void copyBuffer(const GpuBuffer& source, const GpuBuffer& destination);
     // Copies region.size bytes. Source needs TRANSFER_SRC, destination TRANSFER_DST usage.
     void copyBuffer(const GpuBuffer& source, const GpuBuffer& destination, BufferCopy region);
-    // Deprecated (0.3.0): use the BufferCopy form above; removed in 1.0.0. This five-value form
-    // forwards to it.
-    void copyBuffer(const GpuBuffer& source, std::uint64_t source_offset,
-                    const GpuBuffer& destination, std::uint64_t destination_offset,
-                    std::uint64_t size);
     // Copies tightly packed texels from the buffer into the whole image. The image moves to
     // TRANSFER_DST_OPTIMAL first unless it is in that layout or GENERAL. Image copies and
     // transitions handle single-plane colour formats with 1x1 texel blocks only (no depth,

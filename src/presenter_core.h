@@ -2,7 +2,7 @@
 
 // The thread behind a Presenter (design M1b §5): surface, swapchain, acquire fence and the loop
 // that executes PresenterLogic's actions. An internal part of Presenter (spec §9.4: exempt, owned
-// only by its Presenter, created only by ExecutionContext::makePresenter()).
+// only by its Presenter, created only by createPresenter() (presenter_vulkan.h)).
 //
 // Threads: the presenter thread owns every Vulkan object here and the logic; the GUI thread only
 // sets the request block (resize, show, hide, requestFrame) and reads stats and failure; the
@@ -25,6 +25,7 @@
 #include "dvv/base/executor.h"
 #include "dvv/base/move_only_function.h"
 #include "dvv/gpu/presenter.h"
+#include "dvv/gpu/presenter_vulkan.h"
 #include "dvv/platform/window_handle.h"
 #include "presenter_logic.h"
 #include "vk.h"
@@ -68,7 +69,7 @@ class PresenterCore {
 public:
     // Allocates only; no Vulkan object exists yet. `context` and `instance` outlive the core: the
     // Presenter holds the context, which holds the GPU instance and with it the InstanceCore.
-    // `frames` is the provider; options.frames is not read.
+    // `frames` is the provider.
     PresenterCore(ExecutionContext& context, std::shared_ptr<DeviceCore> device,
                   const InstanceCore& instance, PresenterOptions options, FrameProvider frames);
     PresenterCore(const PresenterCore&) = delete;

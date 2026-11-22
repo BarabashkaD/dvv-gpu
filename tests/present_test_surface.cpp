@@ -9,6 +9,7 @@
 #include "dvv/gpu/gpu_instance.h"
 #include "dvv/platform/testing/test_window.h"
 #include "dvv/platform/window_handle.h"
+#include "present_fixture.h"
 #include "surface_vulkan.h"
 
 namespace dvv::gpu::test {
@@ -25,18 +26,6 @@ std::shared_ptr<GpuInstance> createGpuInstance(const GpuInstanceOptions& options
         FAIL(gpu_instance.error().describe());
     }
     return std::move(*gpu_instance);
-}
-
-// The instance and its vkGetInstanceProcAddr, as PresenterCore's constructor reads them.
-struct SurfaceInputs {
-    VkInstance instance = VK_NULL_HANDLE;
-    PFN_vkGetInstanceProcAddr getInstanceProcAddr = nullptr;
-};
-
-SurfaceInputs surfaceInputs(const GpuInstance& gpu_instance) {
-    const detail::InstanceCore& core = detail::Access::instance(gpu_instance);
-    return {.instance = static_cast<VkInstance>(core.instance()),
-            .getInstanceProcAddr = core.dispatch().vkGetInstanceProcAddr};
 }
 
 TestWindow testWindow() {

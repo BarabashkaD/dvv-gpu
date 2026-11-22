@@ -39,14 +39,6 @@ void Presenter::hide() noexcept {
     core_->setVisible(false);
 }
 
-void Presenter::setVisible(bool visible) noexcept {
-    if (visible) {
-        show();
-    } else {
-        hide();
-    }
-}
-
 void Presenter::requestFrame() noexcept {
     core_->requestFrame();
 }
@@ -61,39 +53,21 @@ std::optional<Error> Presenter::failure() const {
 
 Result<std::unique_ptr<Presenter>> createPresenter(ExecutionContext& context,
                                                    PresenterOptions options, FrameProvider frames) {
-    // 0.3.x: a provider in the options as well would be dropped silently by either choice.
-    if (options.frames) {
-        return makeError(Errc::Internal,
-                         std::format("presenter '{}' has two frame providers", options.name));
+    if (detail::Access::core(context).lost()) {
+        return std::unexpected(detail::Access::core(context).lostError());
     }
-    return detail::Access::makePresenter(context, std::move(options), std::move(frames));
-}
-
-Result<std::unique_ptr<Presenter>> ExecutionContext::createPresenter(PresenterOptions options) {
-    // Moved out first: the order in which makePresenter's parameters are initialised is
-    // unspecified.
-    FrameProvider frames = std::move(options.frames);
-    return makePresenter(std::move(options), std::move(frames));
-}
-
-Result<std::unique_ptr<Presenter>> ExecutionContext::makePresenter(PresenterOptions options,
-                                                                   FrameProvider frames) {
-    if (core_->lost()) {
-        return std::unexpected(core_->lostError());
-    }
-    if (!presentation()) {
+    if (!context.presentation()) {
         return makeError(Errc::Internal,
                          std::format("presenter '{}': the context of device {} was created "
                                      "without ContextOptions::presentation",
-                                     options.name, deviceId()));
+                                     options.name, context.deviceId()));
     }
     if (!frames) {
         return makeError(Errc::Internal,
                          std::format("presenter '{}' has no frame provider", options.name));
     }
-    const std::optional<platform::WindowSystem> system =
-        platform::windowHandleOf(options.window).system();
-    const std::optional<platform::WindowSystem> wanted = registry_->windowSystem();
+    const std::optional<platform::WindowSystem> system = options.window.system();
+    const std::optional<platform::WindowSystem> wanted = context.gpuInstance()->windowSystem();
     if (!system || system != wanted) {
         const std::string_view have = system ? platform::windowSystemName(*system) : "no window";
         const std::string_view need =
@@ -104,7 +78,8 @@ Result<std::unique_ptr<Presenter>> ExecutionContext::makePresenter(PresenterOpti
                                      options.name, have, need));
     }
     auto core = std::make_unique<detail::PresenterCore>(
-        *this, core_, detail::Access::instance(*registry_), std::move(options), std::move(frames));
+        context, detail::Access::sharedCore(context),
+        detail::Access::instance(*context.gpuInstance()), std::move(options), std::move(frames));
     DVV_TRY_VOID(core->initialise());
     try {
         core->start();
@@ -114,9 +89,8 @@ Result<std::unique_ptr<Presenter>> ExecutionContext::makePresenter(PresenterOpti
     } catch (const std::bad_alloc&) {
         return makeError(Errc::OutOfMemory, "the presenter thread could not start: out of memory");
     }
-    return std::make_unique<Presenter>(
-        CreationKey<ExecutionContext>(LifetimeRegistry::instance().issue<Presenter>(objectId())),
-        shared_from_this(), std::move(core));
+    return std::make_unique<Presenter>(detail::Access::issueKey<Presenter>(context),
+                                       context.shared_from_this(), std::move(core));
 }
 
 }  // namespace dvv::gpu

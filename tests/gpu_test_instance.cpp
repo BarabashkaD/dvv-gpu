@@ -7,7 +7,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -16,7 +15,7 @@
 #include "dvv/base/log.h"
 #include "dvv/gpu/gpu_info.h"
 #include "dvv/gpu/gpu_instance.h"
-#include "dvv/platform/native_window.h"
+#include "dvv/platform/window_handle.h"
 #include "gpu_fixture.h"
 #include "instance.h"
 
@@ -68,11 +67,9 @@ constexpr char OTHER_SURFACE_EXTENSION[] = "VK_KHR_win32_surface";
 
 }  // namespace
 
-// The 0.3.x names are aliases of the declared classes; 1.0.0 flips them.
-namespace dvv::gpu {
-static_assert(std::is_same_v<GpuRegistry, GpuInstance> &&
-              std::is_same_v<GpuRegistryOptions, GpuInstanceOptions>);
-}  // namespace dvv::gpu
+TEST_CASE_FIXTURE(GpuTest, "leak reports name the GPU instance GpuInstance") {
+    CHECK(gpuInstance().typeName() == "dvv::gpu::GpuInstance");
+}
 
 TEST_CASE_FIXTURE(GpuTest, "the GPU instance finds a usable Vulkan 1.4 device and ranks it first") {
     CHECK(gpuInstance().loaderVersion() >= VK_API_VERSION_1_3);

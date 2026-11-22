@@ -1,17 +1,15 @@
 #pragma once
 
-// GPU buffers and images: RAII over a VMA allocation, the Vulkan handle and a debug
-// name, created by an ExecutionContext. The destructor hands the handle and its memory to the
-// context's retire queue, which frees them once the GPU has finished every submission made so far.
+// GPU buffers: RAII over a VMA allocation, the Vulkan handle and a debug name, created by
+// createBuffer (context_vulkan.h). The destructor hands the handle and its memory to the context's
+// retire queue, which frees them once the GPU has finished every submission made so far.
 // The host reaches a buffer's memory through the scopes MappedWrite and MappedRead.
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
-#include <string_view>
 
 #include <vulkan/vulkan_core.h>
 
@@ -117,18 +115,6 @@ public:
     // Invalidates the mapped range (call after the GPU work completed), then returns the view.
     // Vulkan errors as converted; an empty scope for DeviceOnly without a call.
     [[nodiscard]] Result<MappedRead> mapRead() const;
-    // Deprecated (0.3.0): use mapWrite() or mapRead(); removed in 1.0.0.
-    // The mapped memory of a host-visible buffer (HostUpload, HostReadback); empty otherwise.
-    [[nodiscard]] std::span<std::byte> mapped() const noexcept { return mapped_; }
-    // Deprecated (0.3.0): use MappedWrite::flush(); removed in 1.0.0.
-    // Makes host writes visible to the device; call after writing mapped() and before the GPU
-    // reads. Does nothing on host-coherent memory.
-    [[nodiscard]] Result<void> flush(std::uint64_t offset = 0, std::uint64_t size = VK_WHOLE_SIZE);
-    // Deprecated (0.3.0): use mapRead(); removed in 1.0.0.
-    // Makes device writes visible to the host; call after the GPU work completed and before
-    // reading mapped(). Does nothing on host-coherent memory.
-    [[nodiscard]] Result<void> invalidate(std::uint64_t offset = 0,
-                                          std::uint64_t size = VK_WHOLE_SIZE);
     [[nodiscard]] DeviceId deviceId() const noexcept;
     [[nodiscard]] DeviceGeneration generation() const noexcept { return generation_; }
 
@@ -141,48 +127,6 @@ private:
     VmaAllocation_T* allocation_;
     VkDeviceAddress address_;
     std::span<std::byte> mapped_;
-    DeviceGeneration generation_;
-};
-
-// The Vulkan side of an image (handle, view, format, layout, description) is read through
-// dvv/gpu/context_vulkan.h: vulkanHandle(), vulkanView(), vulkanFormat(), vulkanLayout() and
-// vulkanDesc().
-// Deprecated (0.3.0): the public enable_shared_from_this base; use the image's shared_ptr;
-// removed in 1.0.0.
-class GpuImage final : public Managed<GpuImage>, public std::enable_shared_from_this<GpuImage> {
-public:
-    GpuImage(CreationKey<ExecutionContext> key, std::shared_ptr<detail::DeviceCore> core,
-             ImageDesc desc, VkImage image, VmaAllocation_T* allocation, VkImageView view) noexcept;
-    // Retires the view, then the image and its memory (see above).
-    ~GpuImage();
-
-    [[nodiscard]] std::string_view name() const noexcept;  // the debug name given at creation
-    [[nodiscard]] std::uint32_t width() const noexcept { return desc_.width; }
-    [[nodiscard]] std::uint32_t height() const noexcept { return desc_.height; }
-    // Deprecated (0.3.0): use vulkanDesc() (context_vulkan.h); removed in 1.0.0.
-    [[nodiscard]] const ImageDesc& desc() const noexcept { return desc_; }
-    // Deprecated (0.3.0): use vulkanFormat() (context_vulkan.h); removed in 1.0.0.
-    [[nodiscard]] VkFormat format() const noexcept { return desc_.format; }
-    // Deprecated (0.3.0): use vulkanHandle() (context_vulkan.h); removed in 1.0.0.
-    [[nodiscard]] VkImage handle() const noexcept { return image_; }
-    // Deprecated (0.3.0): use vulkanView() (context_vulkan.h); removed in 1.0.0.
-    [[nodiscard]] VkImageView view() const noexcept { return view_; }
-    // Deprecated (0.3.0): use vulkanLayout() (context_vulkan.h); removed in 1.0.0.
-    [[nodiscard]] VkImageLayout layout() const noexcept {
-        return layout_.load(std::memory_order_acquire);
-    }
-    [[nodiscard]] DeviceId deviceId() const noexcept;
-    [[nodiscard]] DeviceGeneration generation() const noexcept { return generation_; }
-
-private:
-    friend struct detail::Access;  // the command recorder checks the device, updates the layout
-
-    std::shared_ptr<detail::DeviceCore> core_;
-    ImageDesc desc_;
-    VkImage image_;
-    VmaAllocation_T* allocation_;
-    VkImageView view_;
-    std::atomic<VkImageLayout> layout_{VK_IMAGE_LAYOUT_UNDEFINED};
     DeviceGeneration generation_;
 };
 

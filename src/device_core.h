@@ -35,6 +35,13 @@ struct PhysicalDevice;
 using RetiredHandle = std::variant<vk::Buffer, vk::Image, vk::ImageView, vk::Pipeline,
                                    vk::PipelineLayout, vk::DescriptorSetLayout>;
 
+// Counters of the retire queue.
+struct RetireStats {
+    std::size_t retiring = 0;   // handles waiting until the GPU no longer uses them
+    std::uint64_t retired = 0;  // handles ever queued
+    std::uint64_t freed = 0;    // handles ever destroyed
+};
+
 // A handle waiting until the GPU no longer uses it, with its memory (none for views, pipelines and
 // layouts).
 struct RetiredObject {

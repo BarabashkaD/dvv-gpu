@@ -20,7 +20,7 @@
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
 #include "dvv/gpu/resources.h"
-#include "dvv/platform/native_window.h"
+#include "dvv/platform/window_handle.h"
 #include "gpu_fixture.h"
 
 using dvv::gpu::CommandRecorder;

@@ -1,8 +1,7 @@
 #pragma once
 
-// The Vulkan entry points of a context and an image. 0.3.x: includes execution_context.h,
-// resources.h, compute_pipeline.h, embedded_shader.h and submission.h. 1.0.0: the same list, with
-// image.h for GpuImage.
+// The Vulkan entry points of a context and an image. Includes execution_context.h, image.h,
+// resources.h, compute_pipeline.h, embedded_shader.h and submission.h.
 
 #include <cstdint>
 #include <memory>
@@ -14,6 +13,7 @@
 #include "dvv/gpu/compute_pipeline.h"
 #include "dvv/gpu/embedded_shader.h"
 #include "dvv/gpu/execution_context.h"
+#include "dvv/gpu/image.h"
 #include "dvv/gpu/resources.h"
 #include "dvv/gpu/submission.h"
 

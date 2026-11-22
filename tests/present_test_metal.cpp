@@ -11,16 +11,17 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
-#include <variant>
 
 #include <objc/message.h>
 #include <objc/runtime.h>
 
 #include "dvv/gpu/presenter.h"
 #include "dvv/gpu/presenter_vulkan.h"
-#include "dvv/platform/native_window.h"
+#include "dvv/platform/pixel_size.h"
 #include "dvv/platform/testing/test_window.h"
+#include "dvv/platform/window_handle_metal.h"
 #include "present_fixture.h"
 
 namespace dvv::gpu::test {
@@ -46,9 +47,9 @@ struct LayerGeometry {
 };
 
 LayerGeometry layerGeometry(const platform::testing::TestWindow& window) {
-    const platform::NativeWindow native = window.native();
-    REQUIRE(std::holds_alternative<platform::MetalWindow>(native));
-    const auto layer = static_cast<id>(std::get<platform::MetalWindow>(native).layer);
+    const std::optional<platform::MetalWindow> metal = platform::metalWindowOf(window.handle());
+    REQUIRE(metal.has_value());
+    const auto layer = static_cast<id>(metal.value_or(platform::MetalWindow{}).layer);
     REQUIRE(layer != nil);
     // The window and its layer belong to this (the main) thread.
     return {.bounds = reinterpret_cast<LayerRect (*)(id, SEL)>(objc_msgSend)(

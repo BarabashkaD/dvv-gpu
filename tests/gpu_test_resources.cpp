@@ -199,7 +199,7 @@ TEST_CASE_FIXTURE(GpuTest, "a resource the GPU never used is freed when it is de
     buffer.reset();
     image.reset();
     CHECK(dvv::LifetimeRegistry::instance().liveCount() == live_before - 2);
-    const auto stats = context().retireStats();
+    const auto stats = Access::core(context()).retireStats();
     CHECK(stats.retiring == 0);
     CHECK(stats.retired == 2);
     CHECK(stats.freed == 2);
@@ -218,12 +218,12 @@ TEST_CASE_FIXTURE(GpuTest, "a retired resource waits for the submission that may
 
     buffer.reset();
     image.reset();
-    CHECK(context().retireStats().retiring == 2);
+    CHECK(Access::core(context()).retireStats().retiring == 2);
     CHECK(core.collect() == 0);
 
     signalTimeline(core, value);
     CHECK(core.collect() == 2);
-    CHECK(context().retireStats().retiring == 0);
+    CHECK(Access::core(context()).retireStats().retiring == 0);
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a resource keeps the device after its context is gone") {
@@ -257,7 +257,7 @@ TEST_CASE_FIXTURE(GpuTest, "buffers are created and retired from several threads
     constexpr std::uint64_t BUFFERS = std::uint64_t{THREADS} * BUFFERS_PER_THREAD;
     dvv::gpu::ExecutionContext& ctx = context();
     auto& core = Access::core(ctx);
-    const auto before = ctx.retireStats();
+    const auto before = Access::core(ctx).retireStats();
     std::atomic<int> running{THREADS};
     std::atomic<int> failures{0};
     {
@@ -283,7 +283,7 @@ TEST_CASE_FIXTURE(GpuTest, "buffers are created and retired from several threads
         }
     }  // joins the threads
     CHECK(failures.load() == 0);
-    const auto after = ctx.retireStats();
+    const auto after = Access::core(ctx).retireStats();
     CHECK(after.retired - before.retired == BUFFERS);
     CHECK(after.freed - before.freed == BUFFERS);
     CHECK(after.retiring == 0);
@@ -437,18 +437,6 @@ TEST_CASE_FIXTURE(GpuTest, "a stored read scope keeps its bytes") {
             CHECK(holds(scope->bytes(), sequence()));
         }
     }
-}
-
-TEST_CASE_FIXTURE(GpuTest, "the deprecated mapped() still works (0.3.x)") {
-    const auto upload = createBuffer(context(), UPLOAD).value();
-    const auto readback = createBuffer(context(), READBACK).value();
-    writeBytes(upload->mapped(), sequence());
-    REQUIRE(upload->flush().has_value());
-    REQUIRE(submitAndWait([&](CommandRecorder& recorder) {
-                recorder.copyBuffer(*upload, *readback);
-            }).has_value());
-    REQUIRE(readback->invalidate().has_value());
-    CHECK(holds(readback->mapped(), sequence()));
 }
 
 TEST_CASE_FIXTURE(GpuTest, "a moved-from map scope is empty and flushes without a call") {

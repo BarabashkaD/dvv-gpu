@@ -6,7 +6,7 @@
 #include <vulkan/vulkan_core.h>
 
 #include "dvv/base/error.h"
-#include "dvv/platform/native_window.h"
+#include "dvv/platform/pixel_size.h"
 #include "presenter_logic.h"
 
 using dvv::gpu::detail::outcomeOf;

@@ -19,8 +19,8 @@
 #include "dvv/base/log.h"
 #include "dvv/gpu/gpu_info.h"
 #include "dvv/gpu/gpu_instance.h"
-#include "dvv/platform/native_window.h"
 #include "dvv/platform/testing/test_window.h"
+#include "dvv/platform/window_handle.h"
 
 namespace {
 

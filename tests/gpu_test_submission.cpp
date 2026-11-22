@@ -188,13 +188,13 @@ TEST_CASE_FIXTURE(GpuTest, "resources captured by the record function are freed 
     auto buffer =
         createBuffer(context(), {.size = 256, .usage = TRANSFER, .name = "captured"}).value();
     const std::weak_ptr<GpuBuffer> watch = buffer;
-    const auto before = context().retireStats();
+    const auto before = Access::core(context()).retireStats();
     REQUIRE(submitAndWait([buffer = std::move(buffer)](CommandRecorder& recorder) {
                 recorder.fillBuffer(*buffer, 3);
             }).has_value());
     // Released on the executor once the GPU had finished, so freed at once.
     CHECK(watch.expired());
-    const auto after = context().retireStats();
+    const auto after = Access::core(context()).retireStats();
     CHECK(after.retired == before.retired + 1);
     CHECK(after.freed == before.freed + 1);
     CHECK(after.retiring == 0);
@@ -221,13 +221,13 @@ TEST_CASE_FIXTURE(GpuTest, "a resource dropped while its submission is recorded 
     // The recorded fill uses the buffer: it is retired for the submission being recorded, not
     // freed at once.
     buffer.reset();
-    CHECK(context().retireStats().retiring == 1);
+    CHECK(Access::core(context()).retireStats().retiring == 1);
     CHECK(core.collect() == 0);
     dropped.count_down();
     submitting.join();
     REQUIRE(result.has_value());
     // The waiter freed it once the submission had finished.
-    CHECK(context().retireStats().retiring == 0);
+    CHECK(Access::core(context()).retireStats().retiring == 0);
 }
 
 TEST_CASE_FIXTURE(GpuTest,
@@ -492,7 +492,7 @@ TEST_CASE_FIXTURE(GpuTest, "many submissions in flight complete and free what th
                                              .memory = MemoryUsage::HostReadback,
                                              .name = "slices"})
                               .value();
-    const auto before = ctx.retireStats();
+    const auto before = Access::core(ctx).retireStats();
 
     std::vector<dvv::Result<std::uint64_t>> results(SUBMISSIONS);
     std::latch start(THREADS);
@@ -554,7 +554,7 @@ TEST_CASE_FIXTURE(GpuTest, "many submissions in flight complete and free what th
     }
 
     REQUIRE(ctx.drain().has_value());
-    const auto after = ctx.retireStats();
+    const auto after = Access::core(ctx).retireStats();
     CHECK(after.retiring == 0);
     CHECK(after.retired - before.retired == SUBMISSIONS);
     CHECK(after.freed - before.freed == SUBMISSIONS);

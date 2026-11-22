@@ -13,6 +13,8 @@
 #include <optional>
 #include <vector>
 
+#include <vulkan/vulkan_core.h>
+
 #include "dvv/base/error.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
@@ -21,6 +23,14 @@
 #include "dvv/platform/testing/test_window.h"
 
 namespace dvv::gpu::test {
+
+// The instance and its vkGetInstanceProcAddr, as PresenterCore's constructor reads them.
+struct SurfaceInputs {
+    VkInstance instance = VK_NULL_HANDLE;
+    PFN_vkGetInstanceProcAddr getInstanceProcAddr = nullptr;
+};
+
+[[nodiscard]] SurfaceInputs surfaceInputs(const GpuInstance& gpu_instance);
 
 // Shared by a test (test thread) and its frame provider (presenter thread).
 struct ProviderControl {

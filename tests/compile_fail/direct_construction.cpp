@@ -5,11 +5,10 @@
 //   3  constructing an ExecutionContext without a key
 //   4  creating a GpuBuffer without its context
 //   5  creating a GpuImage without its context
-//   6  creating a ResourcePool without its context
-//   7  creating a ComputePipeline without its context
-//   8  creating a Presenter without its context
-//   9  writing a buffer through a const holder (mapWrite() is not const)
-//   10 making a MappedWrite outside its buffer
+//   6  creating a ComputePipeline without its context
+//   7  creating a Presenter without its context
+//   8  writing a buffer through a const holder (mapWrite() is not const)
+//   9  making a MappedWrite outside its buffer
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -19,8 +18,8 @@
 #include "dvv/gpu/compute_pipeline.h"
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/gpu_instance.h"
+#include "dvv/gpu/image.h"
 #include "dvv/gpu/presenter.h"
-#include "dvv/gpu/resource_pool.h"
 #include "dvv/gpu/resources.h"
 
 int main() {
@@ -39,21 +38,16 @@ int main() {
     auto image = std::make_shared<dvv::gpu::GpuImage>(dvv::gpu::ImageDesc{.width = 4});
 #elif DVV_COMPILE_FAIL_CASE == 6
     // Every argument but the key.
-    auto pool = std::make_shared<dvv::gpu::ResourcePool>(
-        std::shared_ptr<dvv::gpu::ExecutionContext>{},
-        std::shared_ptr<dvv::gpu::detail::ResourcePoolState>{});
-#elif DVV_COMPILE_FAIL_CASE == 7
-    // Every argument but the key.
     auto pipeline = std::make_shared<dvv::gpu::ComputePipeline>(
         std::shared_ptr<dvv::gpu::detail::DeviceCore>{}, std::string("add_one"), VkPipelineLayout{},
         VkPipeline{}, 16U, VkDescriptorSetLayout{}, dvv::gpu::ComputeBindings{});
-#elif DVV_COMPILE_FAIL_CASE == 8
+#elif DVV_COMPILE_FAIL_CASE == 7
     // Every argument but the key.
     auto presenter = std::make_unique<dvv::gpu::Presenter>(
         std::shared_ptr<dvv::gpu::ExecutionContext>{}, nullptr);
-#elif DVV_COMPILE_FAIL_CASE == 9
+#elif DVV_COMPILE_FAIL_CASE == 8
     const auto write = [](const dvv::gpu::GpuBuffer& buffer) { return buffer.mapWrite(); };
-#elif DVV_COMPILE_FAIL_CASE == 10
+#elif DVV_COMPILE_FAIL_CASE == 9
     const auto forge = [](dvv::gpu::GpuBuffer& buffer) {
         dvv::gpu::MappedWrite scope(buffer, std::span<std::byte>{});
     };

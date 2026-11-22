@@ -49,8 +49,9 @@ inline constexpr std::uintmax_t MAX_PIPELINE_CACHE_FILE_SIZE = std::uintmax_t{51
 
 // 64-bit FNV-1a.
 [[nodiscard]] std::uint64_t fnv1a64(std::span<const std::byte> data) noexcept;
-// Appends the dvv trailer for the driver data in `data`.
-void appendPipelineCacheTrailer(std::vector<std::byte>& data);
+// Appends the dvv trailer (size, checksum, magic) for the driver data in `data`; `checksum` is
+// fnv1a64 of that data.
+void appendPipelineCacheTrailer(std::vector<std::byte>& data, std::uint64_t checksum);
 // Why `file` is not driver data followed by its dvv trailer (no trailer, a wrong size or
 // checksum); nullopt when it is: the driver data is then the file without its last
 // PIPELINE_CACHE_TRAILER_SIZE bytes.

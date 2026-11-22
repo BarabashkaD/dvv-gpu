@@ -7,10 +7,11 @@ VulkanMemoryAllocator and vk-bootstrap from the dvv-build third-party prefix. Pu
 the Vulkan C types only. The Vulkan loader is loaded at run time, never linked; `vulkan-1.dll` is
 searched for only in the Windows system directory.
 
-Headers. The app-facing headers are gpu_instance.h, execution_context.h, presenter.h and
-bundled_drivers.h. The Vulkan entry points are in context_vulkan.h and presenter_vulkan.h. From
-1.0.0 the app-facing headers include no Vulkan header. Headers that only hold dvv-gpu objects by
-pointer or reference include gpu_fwd.h.
+Headers. The app-facing headers are gpu_instance.h, execution_context.h, presenter.h, image.h,
+gpu_info.h, gpu_info_json.h, bundled_drivers.h and testing/fault_injection.h; they include no
+Vulkan header. The Vulkan entry points are in context_vulkan.h and presenter_vulkan.h, which
+include resources.h, command_recorder.h, compute_pipeline.h and submission.h. Headers that only
+hold dvv-gpu objects by pointer or reference include gpu_fwd.h.
 
 ## Build
 
@@ -24,7 +25,7 @@ versions from the same file:
 
 ```powershell
 git clone https://github.com/BarabashkaD/dvv-gpu
-git clone --branch v0.5.1 https://github.com/BarabashkaD/dvv-build
+git clone --branch v0.6.0 https://github.com/BarabashkaD/dvv-build
 python -m pip install -r dvv-build/tools/requirements.txt
 cmake -DREPO=dvv-gpu -P dvv-build/tools/fetch-deps.cmake
 ./dvv-build/bootstrap.ps1
@@ -104,7 +105,7 @@ Compute shaders are Slang files compiled at build time by the pinned `slangc` of
 prefix and embedded in the program:
 
 ```cmake
-find_package(dvv_gpu 0.3 REQUIRED)   # or dvv_gpu in-tree
+find_package(dvv_gpu 0.4 REQUIRED)   # or dvv_gpu in-tree
 dvv_add_shaders(my_target NAMESPACE my_shaders SHADERS shaders/add_one.slang)
 ```
 
@@ -127,6 +128,10 @@ hand; its size must be a multiple of 4 and cover the shader's push-constant bloc
 `recorder.dispatch(pipeline, std::as_bytes(std::span(&push, 1)), groups)` takes exactly that many
 bytes.
 
+The recorder also fills buffers (`fillBuffer`), copies between buffers (`copyBuffer`), between
+buffers and images (`copyBufferToImage`, `copyImageToBuffer`) and moves images between layouts
+(`transition`).
+
 The command recorder puts a global memory barrier before every work command it records and before
 `raw()`. Commands recorded through `raw()` must order themselves among each other and bring their
 own barriers for stages other than compute and transfer.
@@ -134,10 +139,6 @@ own barriers for stages other than compute and transfer.
 A host-visible buffer is written through `mapWrite()` and read through `mapRead()`. Call `flush()`
 on the write scope after writing and before the GPU reads; `mapRead()` makes the GPU's writes
 visible, so call it after the work completed. `mapWrite()` needs a non-const buffer.
-
-`ResourcePool::acquireBuffer()` returns a lease; a released buffer is handed out again only after
-the GPU has finished every submission made before its return. Keep the lease alive until the
-submission that uses the buffer has completed. Deprecated; removed in 1.0.0.
 
 `ContextOptions::pipelineCacheFile` names the pipeline-cache file (empty: in memory only);
 `defaultPipelineCacheFile(app, device)` gives one file per device in the user's cache directory. A
@@ -193,9 +194,11 @@ the sizes differ.
 ```cpp
 #include "dvv/gpu/context_vulkan.h"
 #include "dvv/gpu/presenter_vulkan.h"
+#include "dvv/platform/window_handle_win32.h"
 // createPresenter and createImage are found through their ExecutionContext argument.
 auto presenter = createPresenter(*context,
-    {.window = dvv::platform::Win32Window{.hinstance = instance, .hwnd = hwnd},
+    {.window = dvv::platform::windowHandleOf(dvv::platform::Win32Window{
+         .hinstance = instance, .hwnd = hwnd}),
      .extent = {.width = 1280, .height = 720},  // client size in physical pixels (a hint)
      .onError = [](const dvv::Error& /*error*/) noexcept { /* forward to the GUI thread */ }},
     [context](const dvv::gpu::PresentFrameParams& params)
@@ -239,10 +242,10 @@ returns `VK_ERROR_DEVICE_LOST` or when `dvv::gpu::testing::injectDeviceLost(cont
 The first cause is logged once (Warn).
 
 - Submissions that complete after the loss, and all later ones, complete with `Errc::DeviceLost`
-  ("the device was lost", or "the device was lost (injected)"). The free `createBuffer`,
-  `createImage` and `createComputePipeline` (context_vulkan.h) and `createPresenter`
-  (presenter_vulkan.h), the members they replace and `createResourcePool` return `DeviceLost`. A
-  presenter fails with `DeviceLost` at its next frame (`failure()`, one `onError`).
+  ("the device was lost", or "the device was lost (injected)"). `createBuffer`, `createImage`
+  and `createComputePipeline` (context_vulkan.h) and `createPresenter` (presenter_vulkan.h)
+  return `DeviceLost`. A presenter fails with `DeviceLost` at its next frame
+  (`failure()`, one `onError`).
 - Waits end once the device is lost, so a silent driver cannot hang them. A lost context does not
   save the pipeline cache.
 - A lost context stays lost; the application destroys it and creates a new one.

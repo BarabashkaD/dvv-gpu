@@ -12,7 +12,7 @@
 #include "dvv/gpu/execution_context.h"
 #include "dvv/gpu/presenter.h"
 #include "dvv/gpu/presenter_vulkan.h"
-#include "dvv/platform/native_window.h"
+#include "dvv/platform/pixel_size.h"
 #include "dvv/platform/testing/test_window.h"
 #include "present_fixture.h"
 
@@ -143,23 +143,6 @@ TEST_CASE_FIXTURE(PresentTest, "hide() and show() repeat without counting") {
     CHECK(errors().size() == 0);
 }
 
-// setVisible stays until 1.0.0 and forwards to show() and hide().
-TEST_CASE_FIXTURE(PresentTest, "setVisible(false) and setVisible(true) still hide and show") {
-    const std::unique_ptr<Presenter> p = makePresenter();
-    presentFirstFrame(window(), *p);
-    p->setVisible(false);
-    REQUIRE(pumpUntil(window(), [&] { return p->stats().hidden; }));
-    p->setVisible(true);
-    REQUIRE(pumpUntil(window(), [&] { return !p->stats().hidden; }));
-    const std::uint64_t n = p->stats().framesPresented;
-    REQUIRE(pumpUntil(window(), [&] {
-        p->requestFrame();
-        return p->stats().framesPresented > n;
-    }));
-    CHECK_FALSE(p->failure());
-    CHECK(errors().size() == 0);
-}
-
 // Design M1b §8.2 case 5.
 TEST_CASE_FIXTURE(PresentTest, "a provider error is reported once and the next frame presents") {
     const std::unique_ptr<Presenter> p = makePresenter();
@@ -214,10 +197,9 @@ TEST_CASE_FIXTURE(PresentTest, "two presenters on one context present concurrent
     const auto second_errors = std::make_shared<ErrorLog>();
     const std::unique_ptr<Presenter> p = makePresenter();
     auto created = createPresenter(context(),
-                                   {.window = second->native(),
+                                   {.window = second->handle(),
                                     .extent = second->clientSize(),
                                     .visible = true,
-                                    .frames = {},
                                     .onError =
                                         [log = second_errors](const Error& error) noexcept {
                                             try {

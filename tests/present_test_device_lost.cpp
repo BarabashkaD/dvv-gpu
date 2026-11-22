@@ -28,10 +28,9 @@ namespace {
 // The frame provider is createPresenter's own argument.
 PresenterOptions lostTestOptions(platform::testing::TestWindow& window,
                                  const std::shared_ptr<ErrorLog>& log) {
-    return {.window = window.native(),
+    return {.window = window.handle(),
             .extent = window.clientSize(),
             .visible = true,
-            .frames = {},
             .onError =
                 [log](const Error& error) noexcept {
                     try {
