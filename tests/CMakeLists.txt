@@ -56,6 +56,20 @@ add_test(NAME dvv_gpu.shader_names
                  "-DGENERATOR=${CMAKE_GENERATOR}"
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/shaders/run-shader-names-check.cmake)
 set_tests_properties(dvv_gpu.slangc_check dvv_gpu.shader_names PROPERTIES TIMEOUT 120)
+# ... and compile shaders that import the sources another target exports.
+add_test(NAME dvv_gpu.shader_imports
+         COMMAND ${CMAKE_COMMAND}
+                 -DSHADERS_MODULE=${dvv_gpu_SOURCE_DIR}/cmake/DvvShaders.cmake
+                 -DPREFIX_PATH=${slangc_prefix_path}
+                 -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/shader-imports-check
+                 "-DGENERATOR=${CMAKE_GENERATOR}"
+                 "-DPLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+                 "-DTOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+                 -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+                 -DGPU_INCLUDE_DIR=${dvv_gpu_SOURCE_DIR}/include
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/shaders/run-shader-imports-check.cmake)
+# Five fresh C++ configures and seven builds: room for Visual Studio's slow compiler detection.
+set_tests_properties(dvv_gpu.shader_imports PROPERTIES TIMEOUT 600)
 
 # GPU tests (spec §12): a separate executable, CTest label gpu. It exits with 77 (reported as
 # skipped) when no usable Vulkan 1.4 device exists, unless DVV_REQUIRE_GPU=1. Every test checks at

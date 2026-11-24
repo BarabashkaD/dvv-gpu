@@ -6,6 +6,18 @@ the dvv rules: compatible = the same 0.minor and at least the minimum version; a
 unused API is removed in the next 0.x minor, with no deprecation period. This file is the release
 notes (there are no GitHub Releases).
 
+## [0.5.0] - 2026-11-24
+
+### Added
+- `dvv_export_shader_sources(<target> [NAMESPACE <namespace>] SOURCES <file.slang>...)`: exports
+  Slang sources for the shaders of other targets (`import <namespace>.<stem>;`), in the build tree
+  and installed; the target property `DVV_SHADER_IMPORT_DIR` names their folder, and the exported
+  target property `DVV_SHADER_INSTALL_DIR` their install folder.
+- `dvv_import_shader_sources(<target> PREFIX <package prefix>)`: in an installed package's config
+  file, points the imported target at its installed sources.
+- `dvv_add_shaders(... IMPORTS <target>...)`: compiles the shaders with the sources the imports
+  export; a changed imported source rebuilds them.
+
 ## [0.4.0] - 2026-11-22
 
 ### Removed

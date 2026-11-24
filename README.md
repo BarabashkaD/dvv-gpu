@@ -105,7 +105,7 @@ Compute shaders are Slang files compiled at build time by the pinned `slangc` of
 prefix and embedded in the program:
 
 ```cmake
-find_package(dvv_gpu 0.4 REQUIRED)   # or dvv_gpu in-tree
+find_package(dvv_gpu 0.5 REQUIRED)   # or dvv_gpu in-tree
 dvv_add_shaders(my_target NAMESPACE my_shaders SHADERS shaders/add_one.slang)
 ```
 
@@ -118,6 +118,32 @@ headers are not installed.
 
 The Slang version is pinned in `cmake/DvvShaders.cmake` (`DVV_SLANGC_VERSION`) and in
 dvv-build's `deps/versions.cmake`; update both together.
+
+### Shader imports
+
+A library shares Slang sources with the shaders of other targets:
+
+```cmake
+dvv_export_shader_sources(my_lib SOURCES shaders/line_math.slang)          # namespace my_lib
+dvv_add_shaders(my_app SHADERS shaders/draw.slang IMPORTS my::lib)         # an alias is fine
+```
+
+`draw.slang` then says `import my_lib.line_math;`. The namespace defaults to the target name as a C
+identifier (`NAMESPACE` sets another). The sources are copied into the build tree and installed to
+`<datadir>/<target>/shaders/<namespace>` (`<datadir>` is `CMAKE_INSTALL_DATADIR` at the target's
+first export call); a changed source rebuilds the shaders that import it. Several export calls for
+one target add up, also from other directories; make them all before the `dvv_add_shaders` call
+that imports the target. Configuring fails when an import is not a target, exports nothing, or
+when two imports export the same `<namespace>/<file>`.
+
+dvv-gpu owns the install folder: the exported target carries it in `DVV_SHADER_INSTALL_DIR`. An
+installed package's config file passes its prefix, after its targets file:
+
+```cmake
+find_dependency(dvv_gpu 0.5)   # gives dvv_import_shader_sources()
+include("${CMAKE_CURRENT_LIST_DIR}/my_libTargets.cmake")
+dvv_import_shader_sources(my::lib PREFIX "${PACKAGE_PREFIX_DIR}")
+```
 
 ## Compute pipelines and the pipeline cache
 
