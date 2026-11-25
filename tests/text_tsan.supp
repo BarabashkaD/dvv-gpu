@@ -1,0 +1,11 @@
+# ThreadSanitizer suppressions for the glyph strip tests on Linux (thread-sanitizer preset only).
+# Each PangoFcFontMap runs its own worker thread, '[pango] fontconfig', that does the fontconfig
+# matching and sorting and frees memory the test thread allocated. The memory is handed over
+# through GLib's GAsyncQueue, whose futex-based locks ThreadSanitizer cannot see: GLib, Pango and
+# fontconfig are system libraries, not instrumented. So their valid accesses are reported as races.
+# A report is suppressed when a frame inside GLib or fontconfig is in the stack of either racing
+# access, of the allocation of the memory or of the creation of a thread in the report. The worker
+# is created by GLib, so every race that involves it is hidden, a race with dvv code as well; races
+# between threads of dvv code are still reported.
+race:libglib-2.0.so
+race:libfontconfig.so

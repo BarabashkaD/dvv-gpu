@@ -1,0 +1,9 @@
+# LeakSanitizer suppressions for the glyph strip tests on Linux (address-sanitizer presets only).
+# A known LeakSanitizer false positive, not a leak: fontconfig 2.15, which Pango loads, keeps the
+# <rejectfont> pattern of its configuration for the life of the process, but stores a pattern's
+# element array as an offset from the pattern (elts_offset), not as a pointer, so LeakSanitizer
+# cannot see that the array is still reachable (fontconfig issue #77, fixed on fontconfig's main
+# branch by merge request !586, in no release yet). Remove this file when the CI image ships a
+# fontconfig with that fix. A leak is suppressed only when its allocation stack has a frame inside
+# fontconfig, so leaks allocated by dvv code are still reported.
+leak:libfontconfig.so

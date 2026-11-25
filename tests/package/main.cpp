@@ -9,6 +9,8 @@
 #include "dvv/gpu/device_id.h"
 #include "dvv/gpu/embedded_shader.h"
 #include "dvv/gpu/execution_context.h"
+#include "dvv/gpu/glyph_strip.h"
+#include "dvv/gpu/glyph_strip_vulkan.h"
 #include "dvv/gpu/gpu_fwd.h"
 #include "dvv/gpu/gpu_info.h"
 #include "dvv/gpu/gpu_info_json.h"
@@ -32,6 +34,8 @@ static_assert(sizeof(dvv::gpu::ExecutionContext) > 0);
 static_assert(sizeof(dvv::gpu::GpuInfo) > 0);
 static_assert(sizeof(&dvv::gpu::toJson) > 0);
 static_assert(sizeof(dvv::gpu::GpuImage) > 0);
+static_assert(sizeof(dvv::gpu::FontSpec) > 0);
+static_assert(sizeof(dvv::gpu::GlyphStripUpload) > 0);
 static_assert(sizeof(dvv::gpu::PresenterOptions) > 0);
 static_assert(sizeof(dvv::gpu::PresentFrame) > 0);
 static_assert(sizeof(dvv::gpu::BufferDesc) > 0);
@@ -58,6 +62,12 @@ int main() {
 #endif
     if (!gpu_instance && (LOADER_REQUIRED || gpu_instance.error().code != dvv::Errc::Unsupported)) {
         std::printf("%s\n", gpu_instance.error().describe().c_str());
+        return 1;
+    }
+    // dvv::gpu_text links the OS text libraries.
+    const auto glyphs = dvv::gpu::rasterGlyphStrip({.family = "", .sizePoints = 11}, 1, "0");
+    if (!glyphs) {
+        std::printf("%s\n", glyphs.error().describe().c_str());
         return 1;
     }
     std::puts(gpu_instance ? "dvv_gpu package works" : "dvv_gpu package works (no Vulkan loader)");

@@ -19,4 +19,37 @@ include("${CMAKE_CURRENT_LIST_DIR}/dvv_gpuTargets.cmake")
 # dvv_add_shaders(); it needs the pinned slangc in CMAKE_PREFIX_PATH when it is called.
 include("${CMAKE_CURRENT_LIST_DIR}/DvvShaders.cmake")
 
+# The `text` component, dvv::gpu_text: only find_package(dvv_gpu COMPONENTS text) loads it, so the
+# users of dvv::gpu alone need none of the OS text libraries. It is a static library: on Linux its
+# users link its Pango too (pangocairo >= 1.44 through pkg-config).
+set(dvv_gpu_text_FOUND FALSE)
+if("text" IN_LIST dvv_gpu_FIND_COMPONENTS)
+    set(_dvv_gpu_text_ready TRUE)
+    if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/dvv_gpuTextTargets.cmake")
+        # Built in-tree without pangocairo.
+        set(_dvv_gpu_text_ready FALSE)
+        if(dvv_gpu_FIND_REQUIRED_text)
+            set(dvv_gpu_NOT_FOUND_MESSAGE
+                "this dvv_gpu install has no text component (built without pangocairo)")
+        endif()
+    elseif(NOT APPLE AND NOT WIN32)
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(DVV_GPU_PANGOCAIRO QUIET IMPORTED_TARGET "pangocairo>=1.44")
+        endif()
+        if(NOT DVV_GPU_PANGOCAIRO_FOUND)
+            set(_dvv_gpu_text_ready FALSE)
+            if(dvv_gpu_FIND_REQUIRED_text)
+                set(dvv_gpu_NOT_FOUND_MESSAGE
+                    "dvv_gpu's text component needs pangocairo >= 1.44 (pkg-config) on Linux")
+            endif()
+        endif()
+    endif()
+    if(_dvv_gpu_text_ready)
+        include("${CMAKE_CURRENT_LIST_DIR}/dvv_gpuTextTargets.cmake")
+        set(dvv_gpu_text_FOUND TRUE)
+    endif()
+    unset(_dvv_gpu_text_ready)
+endif()
+
 check_required_components(dvv_gpu)

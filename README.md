@@ -8,10 +8,11 @@ the Vulkan C types only. The Vulkan loader is loaded at run time, never linked; 
 searched for only in the Windows system directory.
 
 Headers. The app-facing headers are gpu_instance.h, execution_context.h, presenter.h, image.h,
-gpu_info.h, gpu_info_json.h, bundled_drivers.h and testing/fault_injection.h; they include no
-Vulkan header. The Vulkan entry points are in context_vulkan.h and presenter_vulkan.h, which
-include resources.h, command_recorder.h, compute_pipeline.h and submission.h. Headers that only
-hold dvv-gpu objects by pointer or reference include gpu_fwd.h.
+gpu_info.h, gpu_info_json.h, bundled_drivers.h, glyph_strip.h and testing/fault_injection.h; they
+include no Vulkan header. The Vulkan entry points are in context_vulkan.h, presenter_vulkan.h and
+glyph_strip_vulkan.h (`dvv::gpu_text`), which include resources.h, command_recorder.h,
+compute_pipeline.h and submission.h. Headers that only hold dvv-gpu objects by pointer or
+reference include gpu_fwd.h.
 
 ## Build
 
@@ -200,6 +201,57 @@ One shader then serves R8_UINT, R16_UINT and other formats; check `formatFeature
 - **Required features:** `pushDescriptor`, `shaderStorageImageExtendedFormats`,
   `shaderStorageImageWriteWithoutFormat`, `shaderStorageImageReadWithoutFormat` and the six
   descriptor-indexing features; `dvv-gpu-info` lists a device without them as not usable.
+
+## Glyph strips
+
+`dvv::gpu_text` (a separate target) draws short text, such as ruler numbers, for shaders to
+compose. It takes two steps:
+
+1. **Raster** (glyph_strip.h, no GPU): `rasterGlyphStrip(font, scale, chars)` draws 1 to 64
+   printable ASCII characters with an OS font into a `GlyphStrip`: one row of equal cells (the
+   widest glyph's advance), each glyph centred in its cell, white coverage (0..255) on black.
+   `ascent`, `descent` and `advance` are whole pixels; the baseline is the top edge of row
+   `ascent`.
+2. **Upload** (glyph_strip_vulkan.h): `uploadGlyphStrip(*ctx, strip)` creates the strip's image
+   (`VK_FORMAT_R8G8B8A8_UNORM`, the coverage in every channel, `STORAGE`, `TRANSFER_DST` and
+   `TRANSFER_SRC` usage) and fills a staging buffer at once. Its `record` function copies the strip
+   in and leaves the image in `GENERAL`. Move it into your own record function and call it there
+   once, before the dispatch that binds the image; the submission then keeps the staging buffer
+   until the GPU has finished.
+
+Units: `FontSpec::sizePoints` is in the OS's font points and `scale` is output pixels per point.
+The font keeps the design of its point size (optical sizes) and is drawn `scale` times larger, so
+a strip at scale 2 shows the scale-1 design at twice the resolution. Size x scale is at most 4096
+pixels, and a strip at most `MAX_GLYPH_STRIP_SIDE` (16384) pixels wide and tall; larger requests
+are `Errc::Internal` on every OS.
+
+The family `""` is the OS's UI font: the system font on macOS (Core Text), the message font of
+the Windows settings (DirectWrite), and `Sans` on Linux, which fontconfig maps to the desktop's
+sans font (Pango). A family the OS does not know falls back to an OS font; `GlyphStrip::family`
+names the one it drew with. On Windows `FontSpec::family` is a GDI face name, as font lists show
+it, and the family drawn with can differ from it without a fallback: "Segoe UI Semibold" draws
+with "Segoe UI".
+
+Only `dvv::gpu_text` links the OS text libraries: Core Text, Core Graphics and Core Foundation on
+macOS, DirectWrite and user32 on Windows, pangocairo 1.44 or later (pkg-config) on Linux. Taken
+in-tree (FetchContent or add_subdirectory) on Linux, dvv-gpu defines `dvv::gpu_text` only where
+pkg-config finds pangocairo, so the users of `dvv::gpu` alone need no Pango; dvv-gpu's own build
+and its tests require it. An installed package loads it as a component (dvv-gpu 0.6 or later):
+
+```cmake
+find_package(dvv_gpu 0.6 REQUIRED COMPONENTS text)
+target_link_libraries(my_target PRIVATE dvv::gpu_text)
+```
+
+`rasterGlyphStrip` may be called from any thread, also at the same time.
+
+On Linux, LeakSanitizer and ThreadSanitizer report the system font libraries that Pango uses, not
+dvv code: fontconfig's configuration as a leak (a false positive, fixed upstream but in no release
+yet), and races on Pango's worker thread, whose GLib locks the sanitizer cannot see. A consumer's
+sanitizer builds that draw glyph strips get the same reports and need the same suppressions.
+dvv-gpu's sanitizer presets suppress them for its text tests only; the entries and their reasons
+are in tests/text_lsan.supp and tests/text_tsan.supp (not installed). Reports with no frame in
+these libraries still fail the tests.
 
 ## Presentation
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.2)
-project(dvv_gpu VERSION 0.5.0 DESCRIPTION "dvv GPU core" LANGUAGES CXX)
+project(dvv_gpu VERSION 0.6.0 DESCRIPTION "dvv GPU core" LANGUAGES CXX)
 # Version string; a pre-release build adds its release-stage label (user decision U-M4ORDER).
 set(dvv_gpu_VERSION_STRING "${PROJECT_VERSION}")
 
@@ -97,6 +97,50 @@ elseif(NOT APPLE)
     target_include_directories(dvv_gpu SYSTEM PRIVATE ${X11_INCLUDE_DIR})
 endif()
 
+# dvv::gpu_text: glyph strips rasterised with the OS's fonts (Core Text, Pango, DirectWrite). A
+# separate target, so the users of dvv::gpu alone do not link the OS's text libraries.
+set(dvv_gpu_text_available TRUE)
+if(NOT APPLE AND NOT WIN32)
+    # Pango 1.44: pango_context_set_round_glyph_positions. This build and its tests need it. Taken
+    # in-tree (a dependent library or the app), dvv-gpu builds dvv::gpu_text only where pangocairo
+    # is found, so the users of dvv::gpu alone need no Pango.
+    if(PROJECT_IS_TOP_LEVEL OR DVV_BUILD_TESTS)
+        set(dvv_gpu_text_lookup REQUIRED)
+    else()
+        set(dvv_gpu_text_lookup QUIET)
+    endif()
+    find_package(PkgConfig ${dvv_gpu_text_lookup})
+    if(PkgConfig_FOUND)
+        pkg_check_modules(DVV_GPU_PANGOCAIRO ${dvv_gpu_text_lookup} IMPORTED_TARGET
+                          "pangocairo>=1.44")
+    endif()
+    if(NOT DVV_GPU_PANGOCAIRO_FOUND)
+        set(dvv_gpu_text_available FALSE)
+        message(STATUS "dvv_gpu: pangocairo >= 1.44 (pkg-config) not found; dvv::gpu_text is not "
+                       "built")
+    endif()
+endif()
+if(dvv_gpu_text_available)
+    add_library(dvv_gpu_text STATIC src/glyph_strip.cpp src/glyph_strip_vulkan.cpp)
+    add_library(dvv::gpu_text ALIAS dvv_gpu_text)
+    set_target_properties(dvv_gpu_text PROPERTIES EXPORT_NAME gpu_text)
+    target_include_directories(dvv_gpu_text PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    target_link_libraries(dvv_gpu_text PUBLIC dvv::gpu)
+    dvv_set_compiler_options(dvv_gpu_text)
+    dvv_os_sources(dvv_gpu_text src/glyph_strip)
+    if(APPLE)
+        target_link_libraries(dvv_gpu_text PRIVATE
+            "-framework CoreText" "-framework CoreGraphics" "-framework CoreFoundation")
+    elseif(WIN32)
+        # DirectWrite; user32 for the UI font (SystemParametersInfoW).
+        target_link_libraries(dvv_gpu_text PRIVATE dwrite user32)
+    else()
+        target_link_libraries(dvv_gpu_text PRIVATE PkgConfig::DVV_GPU_PANGOCAIRO)
+    endif()
+endif()
+
 # dvv-gpu-info: prints every Vulkan device the GPU instance finds (text or --json).
 add_executable(dvv_gpu_info tools/dvv_gpu_info.cpp)
 set_target_properties(dvv_gpu_info PROPERTIES OUTPUT_NAME dvv-gpu-info)
@@ -105,9 +149,20 @@ dvv_set_compiler_options(dvv_gpu_info)
 
 install(TARGETS dvv_gpu EXPORT dvv_gpuTargets)
 install(TARGETS dvv_gpu_info)
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+# The text headers only with dvv::gpu_text.
+if(TARGET dvv_gpu_text)
+    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+else()
+    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+            PATTERN "glyph_strip*" EXCLUDE)
+endif()
 set(config_dir ${CMAKE_INSTALL_LIBDIR}/cmake/dvv_gpu)
 install(EXPORT dvv_gpuTargets NAMESPACE dvv:: DESTINATION ${config_dir})
+# The package's `text` component: its own export set, loaded only when a consumer asks for it.
+if(TARGET dvv_gpu_text)
+    install(TARGETS dvv_gpu_text EXPORT dvv_gpuTextTargets)
+    install(EXPORT dvv_gpuTextTargets NAMESPACE dvv:: DESTINATION ${config_dir})
+endif()
 configure_package_config_file(cmake/dvv_gpuConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/dvv_gpuConfig.cmake INSTALL_DESTINATION ${config_dir})
 write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/dvv_gpuConfigVersion.cmake

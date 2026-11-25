@@ -4,6 +4,7 @@
 #include "dvv/gpu/bundled_drivers.h"
 #include "dvv/gpu/device_id.h"
 #include "dvv/gpu/execution_context.h"
+#include "dvv/gpu/glyph_strip.h"
 #include "dvv/gpu/gpu_fwd.h"
 #include "dvv/gpu/gpu_info.h"
 #include "dvv/gpu/gpu_info_json.h"
@@ -42,4 +43,5 @@ TEST_CASE("the app-facing headers declare their options without Vulkan") {
     CHECK(dvv::gpu::PresentFrameParams{
               .extent = {}, .frameNumber = 0, .previousFrameCompleted = false}
               .encoding == dvv::gpu::PresentEncoding::Linear);
+    CHECK(dvv::gpu::FontSpec{}.family.empty());
 }
