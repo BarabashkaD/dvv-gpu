@@ -39,6 +39,35 @@ set_tests_properties(dvv_gpu.unit PROPERTIES
 # marks install and consumer tests, which only the full cycle runs (vs2026-small excludes them).
 set_property(TEST dvv_gpu.unit APPEND PROPERTY LABELS sanity)
 
+# The glyph strip tests (dvv::gpu_text): the OS's fonts, no GPU.
+add_executable(dvv_gpu_text_tests main.cpp test_glyph_strip.cpp)
+target_link_libraries(dvv_gpu_text_tests PRIVATE dvv::gpu_text doctest::doctest)
+# The tests also check the shared cell layout (src/glyph_strip_os.h).
+target_include_directories(dvv_gpu_text_tests PRIVATE ${dvv_gpu_SOURCE_DIR}/src)
+target_compile_definitions(dvv_gpu_text_tests PRIVATE DOCTEST_CONFIG_USE_STD_HEADERS)
+dvv_set_compiler_options(dvv_gpu_text_tests)
+add_test(NAME dvv_gpu.text_unit COMMAND dvv_gpu_text_tests)
+# Linux sanitizers: the system font stack is not instrumented, and fontconfig keeps a few blocks of
+# its configuration; see text_lsan.supp and text_tsan.supp. Only the two text tests take these
+# suppressions (dvv_gpu.text_gpu below, together with the GPU tests' own).
+set(text_unit_environment DVV_LEAK_CHECK=fail)
+set(text_linux_asan FALSE)
+set(text_linux_tsan FALSE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND "address" IN_LIST DVV_SANITIZE)
+    set(text_linux_asan TRUE)
+    list(APPEND text_unit_environment
+         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/text_lsan.supp")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND DVV_SANITIZE STREQUAL "thread")
+    set(text_linux_tsan TRUE)
+    list(APPEND text_unit_environment
+         "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/text_tsan.supp")
+endif()
+set_tests_properties(dvv_gpu.text_unit PROPERTIES
+    TIMEOUT 300
+    LABELS sanity
+    ENVIRONMENT "${text_unit_environment}"
+    ENVIRONMENT_MODIFICATION "${DVV_TEST_ENVIRONMENT}")
+
 # dvv_add_shaders() must refuse a missing or wrong slangc at configure time with a clear message.
 string(REPLACE ";" "," slangc_prefix_path "${CMAKE_PREFIX_PATH}")
 add_test(NAME dvv_gpu.slangc_check
@@ -119,6 +148,35 @@ set_tests_properties(dvv_gpu.gpu dvv_gpu.gpu_info PROPERTIES
     ENVIRONMENT "${gpu_test_environment}"
     ENVIRONMENT_MODIFICATION "${DVV_TEST_ENVIRONMENT}")
 set_property(TEST dvv_gpu.gpu_info APPEND PROPERTY LABELS sanity)
+# Glyph strips uploaded into images (dvv::gpu_text on a device).
+add_executable(dvv_gpu_text_device_tests gpu_fixture.cpp gpu_main.cpp gpu_test_glyph_strip.cpp)
+target_link_libraries(dvv_gpu_text_device_tests PRIVATE dvv::gpu_text doctest::doctest)
+target_compile_definitions(dvv_gpu_text_device_tests PRIVATE DOCTEST_CONFIG_USE_STD_HEADERS)
+dvv_set_compiler_options(dvv_gpu_text_device_tests)
+add_test(NAME dvv_gpu.text_gpu COMMAND dvv_gpu_text_device_tests)
+# The font suppressions on top of the GPU tests' environment. ThreadSanitizer reads one suppression
+# file, so this test's file joins tsan.supp and text_tsan.supp.
+set(text_gpu_environment "${gpu_test_environment}")
+if(text_linux_asan)
+    list(APPEND text_gpu_environment
+         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/text_lsan.supp")
+elseif(text_linux_tsan)
+    file(READ ${CMAKE_CURRENT_SOURCE_DIR}/tsan.supp gpu_tsan_suppressions)
+    file(READ ${CMAKE_CURRENT_SOURCE_DIR}/text_tsan.supp text_tsan_suppressions)
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/text_gpu_tsan.supp
+         "${gpu_tsan_suppressions}${text_tsan_suppressions}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tsan.supp ${CMAKE_CURRENT_SOURCE_DIR}/text_tsan.supp)
+    list(FILTER text_gpu_environment EXCLUDE REGEX "^TSAN_OPTIONS=")
+    list(APPEND text_gpu_environment
+         "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_BINARY_DIR}/text_gpu_tsan.supp")
+endif()
+set_tests_properties(dvv_gpu.text_gpu PROPERTIES
+    LABELS "gpu;sanity"
+    SKIP_RETURN_CODE 77
+    TIMEOUT 300
+    ENVIRONMENT "${text_gpu_environment}"
+    ENVIRONMENT_MODIFICATION "${DVV_TEST_ENVIRONMENT}")
 # Presentation tests (design M1b §8.2): raw native windows from dvv::platform_testing, no wx. They
 # exit with 77 without a usable device that can present or without a display, unless
 # DVV_REQUIRE_GPU=1. Linux CI runs them under xvfb-run.

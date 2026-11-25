@@ -6,6 +6,31 @@ the dvv rules: compatible = the same 0.minor and at least the minimum version; a
 unused API is removed in the next 0.x minor, with no deprecation period. This file is the release
 notes (there are no GitHub Releases).
 
+## [0.6.0] - 2026-11-25
+
+### Added
+- `dvv::gpu_text`, a separate library (the installed package's `text` component:
+  `find_package(dvv_gpu COMPONENTS text)`): glyph strips drawn with the OS's fonts, Core Text on
+  macOS, DirectWrite on Windows and Pango (pangocairo 1.44 or later) on Linux. Only this target
+  links the OS text libraries; taken in-tree on Linux, it is defined only where pkg-config finds
+  pangocairo. An install without the component has no text headers.
+- `dvv/gpu/glyph_strip.h`: `FontSpec`, `GlyphStrip`, `MAX_GLYPH_STRIP_SIDE` and
+  `rasterGlyphStrip(font, scale, chars)`: up to 64 printable ASCII characters in equal cells,
+  white coverage on black, in output pixels (`scale` pixels per OS font point), from any thread.
+- `dvv/gpu/glyph_strip_vulkan.h`: `uploadGlyphStrip(context, strip)` and `GlyphStripUpload`: an
+  RGBA8 storage image of the strip and the record function that copies it in, holding its staging
+  buffer until the submission completes.
+- Linux sanitizer suppressions for the text tests `dvv_gpu.text_unit` and `dvv_gpu.text_gpu`
+  only: under LeakSanitizer and ThreadSanitizer, `rasterGlyphStrip` gets reports from the system
+  font libraries, not from dvv code (a false positive leak of fontconfig's configuration, and
+  races on Pango's worker thread, whose GLib locks the sanitizer cannot see). A consumer's
+  sanitizer builds get them too and need the same suppressions; the entries and their reasons are
+  in tests/text_lsan.supp and tests/text_tsan.supp (not installed). Reports with no frame in these
+  libraries still fail the tests.
+
+### Changed
+- dvv-gpu's own Linux build and its tests now require pangocairo 1.44 or later (pkg-config).
+
 ## [0.5.0] - 2026-11-24
 
 ### Added
