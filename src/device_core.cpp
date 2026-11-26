@@ -142,6 +142,20 @@ Result<std::uint64_t> DeviceCore::completedValue() {
     return value.value;
 }
 
+vk::Result DeviceCore::waitQueueIdle(const char* where) noexcept {
+    queue_idle_waits_.fetch_add(1, std::memory_order_relaxed);
+    vk::Result idle = vk::Result::eSuccess;
+    {
+        const auto lock = lockQueue();
+        idle = queue_.waitIdle(dispatch_);
+    }
+    // No logger call under the queue lock.
+    if (idle == vk::Result::eErrorDeviceLost) {
+        markLost(LostCause::Driver, where);
+    }
+    return idle;
+}
+
 bool DeviceCore::markLost(LostCause cause, std::string_view where) noexcept {
     LostCause expected = LostCause::None;
     if (!lost_.compare_exchange_strong(expected, cause, std::memory_order_acq_rel)) {

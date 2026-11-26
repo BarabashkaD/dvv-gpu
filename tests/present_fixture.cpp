@@ -51,6 +51,11 @@ FrameProvider testFrameProvider(std::shared_ptr<ExecutionContext> context,
             extent = platform::PixelSize{}](
                const PresentFrameParams& info) mutable -> Result<PresentFrame> {
         control->calls.fetch_add(1);
+        const std::uint32_t fail_width = control->failAtWidth.load();
+        if (fail_width != 0 && info.extent.width == fail_width) {
+            control->failAtWidth = 0;
+            return makeError(Errc::Io, "injected provider failure");
+        }
         if (control->failNext.exchange(false)) {
             return makeError(Errc::Io, "injected provider failure");
         }
@@ -131,6 +136,18 @@ PresentTest::PresentTest() {
 PresentTest::~PresentTest() {
     context_.reset();
     CHECK(gpu_instance_->validationMessageCount() == 0);
+}
+
+platform::testing::TestWindow& PresentTest::secondWindow() {
+    if (!second_window_) {
+        auto window = platform::testing::TestWindow::create({.width = 320, .height = 240},
+                                                            "dvv present test B");
+        if (!window) {
+            FAIL(window.error().describe());
+        }
+        second_window_.emplace(std::move(*window));
+    }
+    return *second_window_;
 }
 
 PresenterOptions PresentTest::options() {

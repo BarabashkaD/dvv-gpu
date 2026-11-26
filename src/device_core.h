@@ -99,6 +99,15 @@ public:
     [[nodiscard]] std::unique_lock<std::mutex> lockQueue() {
         return std::unique_lock(queue_mutex_);
     }
+    // The only vkQueueWaitIdle: waits under the queue lock and counts the wait. A
+    // VK_ERROR_DEVICE_LOST marks the device lost, with `where` as the place; the caller reports
+    // any error. Not called with the queue lock held.
+    [[nodiscard]] vk::Result waitQueueIdle(const char* where) noexcept;
+    // How many times waitQueueIdle() has been called (tests: a wait stalls every user of the
+    // queue).
+    [[nodiscard]] std::uint64_t queueIdleWaits() const noexcept {
+        return queue_idle_waits_.load(std::memory_order_relaxed);
+    }
     // Reserves the timeline value of the next submission before its commands are recorded, so that
     // everything retired from then on (also while recording) waits for that submission.
     // Contract: only the submit thread reserves values, and every reserved value is signalled,
@@ -188,6 +197,7 @@ private:
     std::mutex queue_mutex_;
     std::atomic<std::uint64_t> last_reserved_{0};
     std::atomic<std::uint64_t> last_submitted_{0};
+    std::atomic<std::uint64_t> queue_idle_waits_{0};
     std::atomic<LostCause> lost_{LostCause::None};
 
     mutable std::mutex retire_mutex_;

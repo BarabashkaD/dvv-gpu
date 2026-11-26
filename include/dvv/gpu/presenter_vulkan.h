@@ -2,6 +2,7 @@
 
 // The Vulkan side of a presenter: the frame provider and createPresenter.
 
+#include <cstdint>
 #include <memory>
 
 #include "dvv/base/error.h"
@@ -16,10 +17,15 @@ namespace dvv::gpu {
 // SAMPLED_IMAGE_FILTER_LINEAR, else nearest). It must belong to this context, have TRANSFER_SRC
 // usage and a format with BLIT_SRC (e.g. R8G8B8A8_UNORM). `record` (may be empty) runs first in
 // the same submission. Both are released on the presenter thread once the submission has
-// completed.
+// completed. `completed` (may be empty) is called once on the presenter thread with the
+// submission's result (the timeline value, or the error) after the submission finished and before
+// the next provider call. A frame dropped before its submission destroys it without a call.
+// The same rules as for the frame provider apply: it must not block long, never wait for the
+// window's thread and never destroy the presenter.
 struct PresentFrame {
     RecordFunction record{};
     std::shared_ptr<GpuImage> image{};
+    MoveOnlyFunction<void(const Result<std::uint64_t>&) noexcept> completed{};
 };
 
 // Called on the presenter thread, at most once per frame and never while a frame is in flight (so

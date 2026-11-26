@@ -47,6 +47,9 @@ if("text" IN_LIST dvv_gpu_FIND_COMPONENTS)
     endif()
     if(_dvv_gpu_text_ready)
         include("${CMAKE_CURRENT_LIST_DIR}/dvv_gpuTextTargets.cmake")
+        # The exported Slang source (dvv_gpu_text.gpu_text) for dvv_add_shaders(... IMPORTS
+        # dvv::gpu_text).
+        dvv_import_shader_sources(dvv::gpu_text PREFIX "${PACKAGE_PREFIX_DIR}")
         set(dvv_gpu_text_FOUND TRUE)
     endif()
     unset(_dvv_gpu_text_ready)

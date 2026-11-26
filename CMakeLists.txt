@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.2)
-project(dvv_gpu VERSION 0.6.0 DESCRIPTION "dvv GPU core" LANGUAGES CXX)
+project(dvv_gpu VERSION 0.7.0 DESCRIPTION "dvv GPU core" LANGUAGES CXX)
 # Version string; a pre-release build adds its release-stage label (user decision U-M4ORDER).
 set(dvv_gpu_VERSION_STRING "${PROJECT_VERSION}")
 
@@ -139,6 +139,9 @@ if(dvv_gpu_text_available)
     else()
         target_link_libraries(dvv_gpu_text PRIVATE PkgConfig::DVV_GPU_PANGOCAIRO)
     endif()
+    # Text in shaders (glyph strip cells, decimal numbers): applications' shaders `import
+    # dvv_gpu_text.gpu_text;` with dvv_add_shaders(... IMPORTS dvv::gpu_text).
+    dvv_export_shader_sources(dvv_gpu_text SOURCES shaders/gpu_text.slang)
 endif()
 
 # dvv-gpu-info: prints every Vulkan device the GPU instance finds (text or --json).

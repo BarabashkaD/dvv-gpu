@@ -94,6 +94,18 @@ public:
     [[nodiscard]] PresenterStats stats() const;
     [[nodiscard]] std::optional<Error> failure() const;
 
+    // Where the swapchains replaced by a recreate went (the retirement rule of
+    // recreateSwapchain()); tests read it through detail::Access.
+    struct RetirementStats {
+        std::uint64_t parked = 0;               // kept in retired_ after a recreate
+        std::uint64_t destroyedAfterFrame = 0;  // parked ones destroyed once a frame completed
+        std::uint64_t destroyedAtOnce = 0;      // replaced again before any frame completed
+        [[nodiscard]] std::uint64_t pending() const noexcept {
+            return parked - destroyedAfterFrame;
+        }
+    };
+    [[nodiscard]] RetirementStats retirementStats() const;
+
     // The mailbox: queues work for the presenter thread; throws std::bad_alloc when it cannot.
     void post(MoveOnlyFunction<void()> work);
     // Called by the frame's coroutine on the presenter thread when its submission has finished.
@@ -125,6 +137,9 @@ private:
     void failSwapchain(vk::Result result, std::string_view what);
     void teardown() noexcept;
     void releaseVulkanObjects() noexcept;
+    // Destroys retired_ (if any): a frame on the current swapchain has completed, or the queue is
+    // idle (teardown()).
+    void destroyRetiredSwapchain() noexcept;
     void fail(Error error) noexcept;
     void reportFrameError(const Error& error);
     void publishState();
@@ -151,6 +166,9 @@ private:
     vk::Fence fence_;
     bool fence_leaked_ = false;  // the 5 s cap of design M1b §5.2 step 4 passed: never destroyed
     vk::SwapchainKHR swapchain_;
+    // The swapchain replaced by the last recreate, whose presents may still run (at most one;
+    // see recreateSwapchain()).
+    vk::SwapchainKHR retired_;
     std::vector<vk::Image> images_;
     VkExtent2D extent_{};
     std::uint32_t acquired_index_ = 0;
@@ -164,6 +182,7 @@ private:
     Requests requests_{};
     std::vector<MoveOnlyFunction<void()>> mailbox_;
     PresenterStats stats_{};
+    RetirementStats retirement_{};
     std::optional<Error> failure_;
 
     std::jthread thread_;  // started by start(), joined by stop()
