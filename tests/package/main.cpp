@@ -1,6 +1,7 @@
 #include <cstdio>
 
 #include "consumer_shaders/add_one.h"
+#include "consumer_shaders/text_import.h"
 #include "dvv/base/error.h"
 #include "dvv/gpu/bundled_drivers.h"
 #include "dvv/gpu/command_recorder.h"
@@ -44,7 +45,9 @@ static_assert(sizeof(&dvv::gpu::testing::injectDeviceLost) > 0);
 
 int main() {
     // A shader embedded by dvv_add_shaders().
-    if (consumer_shaders::addOne().spirv.empty() ||
+    if (consumer_shaders::textImport().spirv.empty() ||
+        consumer_shaders::textImport().spirv[0] != 0x07230203U ||
+        consumer_shaders::addOne().spirv.empty() ||
         consumer_shaders::addOne().spirv[0] != 0x07230203U) {
         std::puts("the embedded shader is not SPIR-V");
         return 1;

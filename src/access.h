@@ -20,6 +20,7 @@
 #include "image_state.h"
 #include "instance.h"
 #include "pipeline_cache.h"
+#include "presenter_core.h"
 #include "submitter.h"
 
 namespace dvv::gpu::detail {
@@ -30,6 +31,9 @@ struct Access {
     }
     [[nodiscard]] static DeviceCore& core(const ExecutionContext& context) noexcept {
         return *context.core_;
+    }
+    [[nodiscard]] static const PresenterCore& core(const Presenter& presenter) noexcept {
+        return *presenter.core_;
     }
     [[nodiscard]] static DeviceCore& core(const GpuBuffer& buffer) noexcept {
         return *buffer.core_;

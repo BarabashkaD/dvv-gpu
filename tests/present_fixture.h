@@ -35,7 +35,9 @@ struct SurfaceInputs {
 // Shared by a test (test thread) and its frame provider (presenter thread).
 struct ProviderControl {
     std::atomic<std::uint64_t> calls{0};
-    std::atomic<bool> failNext{false};            // the next call returns Errc::Io
+    std::atomic<bool> failNext{false};  // the next call returns Errc::Io
+    // The next call whose frame is this wide returns Errc::Io (once); 0 for none.
+    std::atomic<std::uint32_t> failAtWidth{0};
     std::atomic<bool> throwNext{false};           // the next call throws a non-std exception
     std::atomic<bool> withoutTransferSrc{false};  // the image lacks TRANSFER_SRC usage
     std::atomic<bool> integerFormat{false};       // the image is R8G8B8A8_UINT (not blittable)
@@ -86,6 +88,8 @@ public:
         return context_;
     }
     [[nodiscard]] platform::testing::TestWindow& window() noexcept { return *window_; }
+    // A second 320x240 window, created on the first call; it lives as long as the fixture.
+    [[nodiscard]] platform::testing::TestWindow& secondWindow();
     [[nodiscard]] ProviderControl& control() const noexcept { return *control_; }
     [[nodiscard]] const ErrorLog& errors() const noexcept { return *errors_; }
 
@@ -101,6 +105,7 @@ private:
     std::shared_ptr<GpuInstance> gpu_instance_;
     std::shared_ptr<ExecutionContext> context_;
     std::optional<platform::testing::TestWindow> window_;
+    std::optional<platform::testing::TestWindow> second_window_;
     std::shared_ptr<ProviderControl> control_ = std::make_shared<ProviderControl>();
     std::shared_ptr<ErrorLog> errors_ = std::make_shared<ErrorLog>();
 };

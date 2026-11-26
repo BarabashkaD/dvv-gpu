@@ -219,6 +219,20 @@ compose. It takes two steps:
    once, before the dispatch that binds the image; the submission then keeps the staging buffer
    until the GPU has finished.
 
+Shaders read the strip through the exported module `dvv_gpu_text.gpu_text` (gpu_text.slang, namespace
+`dvv::gpu`, dvv-gpu 0.7 or later), which `dvv_add_shaders(... IMPORTS dvv::gpu_text)` takes:
+
+```slang
+import dvv_gpu_text.gpu_text;
+using namespace dvv::gpu;  // or dvv::gpu::decimalCoverage(...)
+```
+
+`glyphCells(strip, cellCount)` gives the cell grid (`GlyphCells`: `advance` and `height`; both 0
+without a usable grid), `cellCoverage` the coverage of one cell at a pixel, `decimalDigits` and
+`decimalDigitAt` the digits of an unsigned value, and `decimalCoverage` the coverage of a value
+drawn in decimal from the strip's digit cells. The strip does not hold its cell count: the caller
+passes it.
+
 Units: `FontSpec::sizePoints` is in the OS's font points and `scale` is output pixels per point.
 The font keeps the design of its point size (optical sizes) and is drawn `scale` times larger, so
 a strip at scale 2 shows the scale-1 design at twice the resolution. Size x scale is at most 4096
@@ -306,6 +320,14 @@ A real provider keeps its image while the extent stays the same
   thread; they must never wait for the window's thread and never destroy the presenter. Create and
   destroy the presenter on the window's thread, and do not call `ExecutionContext::drain()` there
   while a presenter lives.
+- **Completion callback.** `PresentFrame::completed` (optional) is called once on the presenter
+  thread with the submission's result (the timeline value, or the error) after the frame's
+  submission has finished and before the next provider call; a frame dropped before its submission
+  is destroyed without a call. The provider's rules apply: it must not block long, wait for the
+  window's thread or destroy the presenter.
+- **Resize.** A swapchain recreate does not wait for queue idle: the old swapchain is destroyed
+  once the first frame on the new one has completed, so presenters on one context do not stall each
+  other.
 - **One frame in flight.** The provider is called again only after the previous frame's submission
   has completed, so it can reuse one image. While hidden (`hide()`, a minimised window or a 0×0
   surface) nothing is rendered.

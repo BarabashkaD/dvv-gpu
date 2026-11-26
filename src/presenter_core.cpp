@@ -1,6 +1,7 @@
 #include "presenter_core.h"
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <coroutine>
 #include <exception>
@@ -66,7 +67,8 @@ struct FrameJob {
 // Pointers, not references: the coroutine frame keeps its parameters. The core outlives the job
 // (its thread never exits with a frame in flight); the context outlives the core.
 FrameJob runFrame(PresenterCore* core, ExecutionContext* context, IExecutor* mailbox,
-                  RecordFunction record) {
+                  RecordFunction record,
+                  MoveOnlyFunction<void(const Result<std::uint64_t>&) noexcept> completed) {
     Result<std::uint64_t> result{};
     try {
         result = co_await submit(*context, *mailbox, std::move(record));
@@ -78,6 +80,9 @@ FrameJob runFrame(PresenterCore* core, ExecutionContext* context, IExecutor* mai
                            std::format("queuing a presenter frame failed: {}", error.what()));
     } catch (...) {
         result = makeError(Errc::Internal, "queuing a presenter frame failed");
+    }
+    if (completed) {
+        completed(result);
     }
     core->frameFinished(std::move(result));
 }
@@ -271,6 +276,11 @@ void PresenterCore::requestFrame() noexcept {
 PresenterStats PresenterCore::stats() const {
     const std::lock_guard lock(mutex_);
     return stats_;
+}
+
+PresenterCore::RetirementStats PresenterCore::retirementStats() const {
+    const std::lock_guard lock(mutex_);
+    return retirement_;
 }
 
 std::optional<Error> PresenterCore::failure() const {
@@ -522,7 +532,7 @@ void PresenterCore::startFrame(PresentFrame frame, std::uint32_t index) noexcept
             }
             Access::presentBlit(recorder, *image, target, extent);
         };
-        runFrame(this, context_, &mailbox_executor_, std::move(record));
+        runFrame(this, context_, &mailbox_executor_, std::move(record), std::move(frame.completed));
     } catch (const std::bad_alloc&) {
         completion_ = makeError(Errc::OutOfMemory, "starting a presenter frame: out of memory");
     } catch (const std::exception& error) {
@@ -544,6 +554,11 @@ void PresenterCore::processCompletion() noexcept {
     completion_.reset();
     in_flight_ = false;
     if (result) {
+        if (retired_) {
+            destroyRetiredSwapchain();  // the first frame on the new swapchain has completed
+            const std::lock_guard lock(mutex_);
+            ++retirement_.destroyedAfterFrame;
+        }
         logic_.frameCompleted(std::nullopt);
         return;
     }
@@ -596,6 +611,7 @@ void PresenterCore::present() {
 
 // design M1b §5.3: only in phase Idle (the logic asks for it only then).
 void PresenterCore::recreateSwapchain() {
+    assert(!in_flight_ && "a swapchain is recreated only with no frame in flight");
     const auto& api = device_->dispatch();
     const vk::Device device = device_->device();
     const auto caps = device_->physicalDevice().getSurfaceCapabilitiesKHR(surface_, api);
@@ -635,17 +651,19 @@ void PresenterCore::recreateSwapchain() {
     images_.clear();
     extent_ = extent;
     if (old) {
-        // D7: presentation is done with the old images once the queue is idle (accepted practice
-        // without VK_KHR_swapchain_maintenance1; exact retirement is F3).
-        vk::Result idle = vk::Result::eSuccess;
-        {
-            const auto queue_lock = device_->lockQueue();
-            idle = device_->queue().waitIdle(api);
-        }
-        device.destroySwapchainKHR(old, nullptr, api);
-        if (idle != vk::Result::eSuccess) {
-            failSwapchain(idle, "vkQueueWaitIdle");
-            return;
+        // No queue idle wait: it would stall every other user of the shared queue. Without
+        // VK_KHR_swapchain_maintenance1 the old swapchain waits in retired_ until a frame on the
+        // new one has completed (processCompletion) or teardown() has waited for the queue. When
+        // retired_ is still taken, no frame has completed since the last recreate, so nothing
+        // was presented from `old` (presents follow completed frames only) and it goes at once.
+        if (retired_) {
+            device.destroySwapchainKHR(old, nullptr, api);
+            const std::lock_guard lock(mutex_);
+            ++retirement_.destroyedAtOnce;
+        } else {
+            retired_ = old;
+            const std::lock_guard lock(mutex_);
+            ++retirement_.parked;
         }
     }
     // The count-and-fill form, not the vector one: that one reads its count unset when the first
@@ -687,12 +705,7 @@ void PresenterCore::failSwapchain(vk::Result result, std::string_view what) {
 
 // design M1b §5.5: Exit. No frame is in flight here.
 void PresenterCore::teardown() noexcept {
-    vk::Result idle = vk::Result::eSuccess;
-    {
-        const auto queue_lock = device_->lockQueue();
-        idle = device_->queue().waitIdle(device_->dispatch());
-    }
-    markIfLost(*device_, idle, "vkQueueWaitIdle");
+    const vk::Result idle = device_->waitQueueIdle("vkQueueWaitIdle");
     if (idle != vk::Result::eSuccess) {
         DVV_LOG_ERROR("presenter '{}': vkQueueWaitIdle failed while closing: {}", name_,
                       vk::to_string(idle));
@@ -703,6 +716,7 @@ void PresenterCore::teardown() noexcept {
 void PresenterCore::releaseVulkanObjects() noexcept {
     const auto& api = device_->dispatch();
     const vk::Device device = device_->device();
+    destroyRetiredSwapchain();
     if (swapchain_) {
         device.destroySwapchainKHR(swapchain_, nullptr, api);
         swapchain_ = nullptr;
@@ -715,6 +729,13 @@ void PresenterCore::releaseVulkanObjects() noexcept {
     if (surface_) {
         vk::Instance(instance_).destroySurfaceKHR(surface_, nullptr, api);
         surface_ = nullptr;
+    }
+}
+
+void PresenterCore::destroyRetiredSwapchain() noexcept {
+    if (retired_) {
+        device_->device().destroySwapchainKHR(retired_, nullptr, device_->dispatch());
+        retired_ = nullptr;
     }
 }
 

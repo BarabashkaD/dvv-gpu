@@ -149,8 +149,16 @@ set_tests_properties(dvv_gpu.gpu dvv_gpu.gpu_info PROPERTIES
     ENVIRONMENT_MODIFICATION "${DVV_TEST_ENVIRONMENT}")
 set_property(TEST dvv_gpu.gpu_info APPEND PROPERTY LABELS sanity)
 # Glyph strips uploaded into images (dvv::gpu_text on a device).
-add_executable(dvv_gpu_text_device_tests gpu_fixture.cpp gpu_main.cpp gpu_test_glyph_strip.cpp)
-target_link_libraries(dvv_gpu_text_device_tests PRIVATE dvv::gpu_text doctest::doctest)
+# The probe of shaders/gpu_text.slang, which it imports as the exported module
+# dvv_gpu_text.gpu_text (the way an application's shaders take it).
+add_library(dvv_gpu_text_test_shaders STATIC)
+dvv_add_shaders(dvv_gpu_text_test_shaders NAMESPACE test_shaders
+    SHADERS shaders/text_probe.slang IMPORTS dvv::gpu_text)
+dvv_set_compiler_options(dvv_gpu_text_test_shaders)
+add_executable(dvv_gpu_text_device_tests gpu_fixture.cpp gpu_main.cpp gpu_test_glyph_strip.cpp
+                                         gpu_test_text_module.cpp)
+target_link_libraries(dvv_gpu_text_device_tests PRIVATE dvv::gpu_text dvv_gpu_text_test_shaders
+                                                        doctest::doctest)
 target_compile_definitions(dvv_gpu_text_device_tests PRIVATE DOCTEST_CONFIG_USE_STD_HEADERS)
 dvv_set_compiler_options(dvv_gpu_text_device_tests)
 add_test(NAME dvv_gpu.text_gpu COMMAND dvv_gpu_text_device_tests)

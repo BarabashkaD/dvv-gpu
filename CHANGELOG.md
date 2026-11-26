@@ -6,6 +6,26 @@ the dvv rules: compatible = the same 0.minor and at least the minimum version; a
 unused API is removed in the next 0.x minor, with no deprecation period. This file is the release
 notes (there are no GitHub Releases).
 
+## [0.7.0] - 2026-11-26
+
+### Added
+- `shaders/gpu_text.slang`, the exported shader module of `dvv::gpu_text` (the `text` component):
+  `import dvv_gpu_text.gpu_text;`, in namespace `dvv::gpu`. It reads a glyph strip's storage image
+  (as `uploadGlyphStrip` makes it): `GlyphCells` and `glyphCells(strip, cellCount)`,
+  `cellCoverage`, `decimalDigits`, `decimalDigitAt` and `decimalCoverage`, which draws a
+  non-negative integer in decimal from the strip's digit cells.
+- `PresentFrame::completed` (may be empty): called once on the presenter thread with the
+  submission's result (the timeline value, or the error) after the frame's submission finished and
+  before the next provider call. A frame dropped before its submission destroys it without a call.
+
+### Fixed
+- A swapchain recreate no longer waits for the queue to be idle: the old swapchain is retired and
+  destroyed once the first frame on the new one has completed (or in the presenter's teardown), so
+  resizing one presenter does not stall other presenters or submitters on the same context.
+
+### Changed
+- The dvv-build minimum is 0.6.1.
+
 ## [0.6.0] - 2026-11-25
 
 ### Added
